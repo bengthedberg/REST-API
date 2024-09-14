@@ -1,0 +1,63 @@
+@baseURL = http://localhost:5181
+
+### Create a new movie
+# @name createMovie
+POST {{baseURL}}/api/movies
+Content-Type: application/json
+Accept: application/json
+
+{
+  "Title": "Inception",
+  "Year": 2010,
+  "Genre": [
+    "Action",
+    "Adventure",
+    "Cinema",
+    "Thriller"
+  ]
+}
+
+### Save location information
+@location = {{createMovie.response.headers.Location}}
+
+### Get movie using location information
+# @name getMovie
+GET {{location}}
+Content-Type: application/json
+Accept: application/json
+
+### Save the movie id
+@movieId = {{getMovie.response.body.id}}
+
+### Update a Movie using id
+PUT {{baseURL}}/api/movies/{{movieId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "Title": "Inception",
+  "Year": 2011,
+  "Genre": [
+    "Action",
+    "Adventure",
+    "Cinema",
+    "Thriller",
+    "Sci-fi"
+  ]
+}
+
+### Get Movie using slug
+Get {{baseURL}}/api/movies/inception-2010
+Content-Type: application/json
+Accept: application/json
+
+
+### Get All Movies
+GET {{baseURL}}/api/movies
+Content-Type: application/json
+Accept: application/json
+
+### Delete a Movie using id
+DELETE {{baseURL}}/api/movies/{{movieId}}
+Content-Type: application/json
+Accept: application/json
