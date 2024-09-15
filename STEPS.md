@@ -108,6 +108,10 @@ git commit -m 'add create movie request/response'
 A repository is responsible for creating a database connection to a database server and 
 connecting to the database server using the provided parameters specified.
 
+We will not be using Entity Framework, instead we will use the Dapper ORM framework. Though you could replace it with a NoSQL database if you want to, or anything else for that matter.
+
+If we were using Entity Framework then we would not require a repository as that is provided within the framwork.
+
 Initially we will store the data in an internal list.
 
 Add a model for the movies:
@@ -957,3 +961,12 @@ dotnet add ./Movies.Application/Movies.Application.csproj package Npgsq
   }
 
   ```
+
+  ## Add Business Logic
+
+  We need to introduce a service that manage the business logic. We do not want to add that logic in the existing repository as
+  its responsibility is to persist the data in the database. We also do not waht this logic in the controller, resulting in *fat controllers*. 
+
+  Add a service between the controller and the repository, where the business logic sits.
+
+  
