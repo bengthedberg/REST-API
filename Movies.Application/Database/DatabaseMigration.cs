@@ -27,6 +27,16 @@ public class DatabaseMigration
     """
     CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_movies_slug ON movies USING btree(slug);
     """);
+
+  await connection.ExecuteAsync(
+    """
+    CREATE TABLE IF NOT EXISTS genres (
+        movieId UUID REFERENCES movies(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        PRIMARY KEY(movieId, name)
+    );
+    """);
+      
   }    
 
 }

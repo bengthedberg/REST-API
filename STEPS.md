@@ -691,16 +691,26 @@ dotnet add ./Movies.Application/Movies.Application.csproj package Npgsq
             id UUID PRIMARY KEY,
             title TEXT NOT NULL,
             slug TEXT NOT NULL,
-            release_year INTEGER NOT NULL
+            year INTEGER NOT NULL
         );
         """);
       await connection.ExecuteAsync(
         """
-        CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_movies_id ON movies USING btree(id);
+        CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_movies_slug ON movies USING btree(slug);
+        """);
+
+      await connection.ExecuteAsync(
+        """
+        CREATE TABLE IF NOT EXISTS genres (
+            movieId UUID REFERENCES movies(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            PRIMARY KEY(movieId, name)
+        );
         """);
       }    
 
     }
+
     ```
 
 4. Register the connection factory and migrate classes
