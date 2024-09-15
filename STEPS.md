@@ -585,3 +585,204 @@ In our case the slug will be the title + the year.
       Content-Type: application/json
       Accept: application/json
       ```   
+
+### Add a Database for local development
+
+Docker will be used for local development. This will create a local PostgreSQL database instance.
+
+Create a `docker-compose.yml` file:
+
+```yml
+version: "3.8"
+services:
+  db:
+    image: postgres
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: movies
+    ports:
+      - 5432:5432
+    volumes:
+      - ./data:/var/lib/postgresql/data
+```
+
+You can start the database with the command:
+
+`docker-compose up -d`
+
+### Refactor Application to use PostgeSQL database
+
+#### Install dependencies
+
+Dapper will be used as a ORM for the application. 
+
+Add the following nuget packages:
+
+```
+dotnet add ./Movies.Application/Movies.Application.csproj package Dapper
+dotnet add ./Movies.Application/Movies.Application.csproj package Npgsq
+```
+
+#### Add Database Scaffolds to Application
+
+1. Add `Database\IDatabaaseConnectionFactory.cs` 
+   ```csharp
+    using System.Data;
+
+    namespace Movies.Application.Database;
+
+    public interface IDatabaseConnectionFactory
+    { 
+        Task<IDbConnection> CreateConnectionAsync();
+    }
+   ```
+
+2. Implement `Database\IDatabaseConnectionFactory` with the `Database\NpgSqlConnectionFactory.cs`   
+   ```csharp
+    using System.Data;
+    using Npgsql;
+
+    namespace Movies.Application.Database;
+
+    public class NpgSqlConnectionFactory : IDatabaseConnectionFactory
+    {
+        private readonly string _connectionString;
+
+        public NpgSqlConnectionFactory(string connectionString)
+        {
+            _connectionString = connectionString;
+        }
+
+        public async Task<IDbConnection> CreateConnectionAsync()
+        {
+            var connection = new NpgsqlConnection(_connectionString);
+            await connection.OpenAsync();
+            return connection;
+        }
+    }
+   ```
+
+3. Create a Database Migration
+
+    Implement a simple database migration using the following class 
+
+    `Database\DatabaseMigration.cs`
+    ```csharp
+    using Dapper;
+    namespace Movies.Application.Database;
+
+    public class DatabaseMigration
+    {
+
+      private readonly IDatabaseConnectionFactory _connectionFactory; 
+
+      public DatabaseMigration(IDatabaseConnectionFactory connectionFactory)
+      {
+          _connectionFactory = connectionFactory;
+      }
+
+      public async Task Migrate()
+      {
+        using var connection = await _connectionFactory.CreateConnectionAsync();
+        await connection.ExecuteAsync(
+        """
+        CREATE TABLE IF NOT EXISTS movies (
+            id UUID PRIMARY KEY,
+            title TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            release_year INTEGER NOT NULL
+        );
+        """);
+      await connection.ExecuteAsync(
+        """
+        CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_movies_id ON movies USING btree(id);
+        """);
+      }    
+
+    }
+    ```
+
+4. Register the connection factory and migrate classes
+
+    Add the connection factory and migration methods to the `ServiceExtension` class
+    ```csharp
+    using Microsoft.Extensions.DependencyInjection;
+    using Movies.Application.Database;
+    using Movies.Application.Repositories;
+
+    public static class ServiceExtension
+    {
+        public static IServiceCollection AddApplication(this IServiceCollection services)
+        {
+            services.AddSingleton<IMovieRepository, MovieRepository>();
+            return services;
+        }
+
+        public static IServiceCollection AddDatabases(this IServiceCollection services, string connectionString)
+        {
+            // Note The factory is a singleton instance, but the CreateConnectionAsync method will create a new 
+            // connection for each request.
+            services.AddSingleton<IDatabaseConnectionFactory>(_ => new NpgSqlConnectionFactory(connectionString));
+            services.AddSingleton<DatabaseMigration>();
+            return services;
+        }
+    }
+    ```
+
+5. Setup the startup and migration logic:
+
+    Use the `ServiceExtension` in the startup process, by adding the following to `Program.cs`:
+    ```csharp
+    using Movies.Application.Database;
+
+    var builder = WebApplication.CreateBuilder(args);
+    var config = builder.Configuration;
+    // Add services to the container.
+
+    builder.Services.AddControllers();
+    // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddSwaggerGen();
+
+    builder.Services.AddApplication();
+    builder.Services.AddDatabases(config["Database:ConnectionString"]!);
+
+    var app = builder.Build();
+
+    // Configure the HTTP request pipeline.
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI();
+    }
+
+    app.UseHttpsRedirection();
+
+    app.UseAuthorization();
+
+    app.MapControllers();
+
+    var dbMigration = app.Services.GetRequiredService<DatabaseMigration>();
+    await dbMigration.Migrate();
+
+    app.Run();
+
+    ```
+
+    Add the connection string to `appsettings.json`
+    ```json
+    {
+      "Database" : {
+        "ConnectionString": "Server=localhost;Port=5432;Database=movies;User Id=demo;Password=demo;"
+      },
+      "Logging": {
+        "LogLevel": {
+          "Default": "Information",
+          "Microsoft.AspNetCore": "Warning"
+        }
+      },
+      "AllowedHosts": "*"
+    }
+    ```
+
