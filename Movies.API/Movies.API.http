@@ -7,8 +7,8 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "Title": "Inception",
-  "Year": 2010,
+  "Title": "Inception 4",
+  "Year": 2014,
   "Genre": [
     "Action",
     "Adventure",
@@ -35,19 +35,16 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "Title": "Inception",
+  "Title": "Inception 55",
   "Year": 2011,
   "Genre": [
-    "Action",
-    "Adventure",
-    "Cinema",
-    "Thriller",
-    "Sci-fi"
+    "Kids",
+    "Action"
   ]
 }
 
 ### Get Movie using slug
-Get {{baseURL}}/api/movies/inception-2010
+Get {{baseURL}}/api/movies/inception-201
 Content-Type: application/json
 Accept: application/json
 
