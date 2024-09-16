@@ -1150,3 +1150,251 @@ DTOs are most commonly used by the Services layer in an N-Tier application to tr
 
 As this solution does not cover clean architecture, etc. then this will be ignored.
 
+## Validation
+
+There are 2 types of validations
+
+- API Validation for incoming requests
+- Business logic validation
+
+In this section we will implement business logic validations, using Fluent Validation.
+
+1. Add Fluent Validation to the Application project.
+
+    `dotnet add .\Movies.Application\Movies.Application.csproj package FluentValidation.DependencyInjectionExtensions`
+
+2. Create `Validators\MovieValidator.cs`
+    ```csharp
+    using FluentValidation;
+    using Movies.Application.Models;
+    using Movies.Application.Repositories;
+
+    namespace Movies.Application.Validators;
+
+    public class MovieValidator : AbstractValidator<Movie>
+    {
+        private readonly IMovieRepository _movieRepository;
+
+        public MovieValidator(IMovieRepository movieRepository)
+        {
+            _movieRepository = movieRepository;
+
+            RuleFor(x => x.Id)
+                .NotEmpty();
+            RuleFor(x => x.Genre)
+                .NotEmpty();
+            RuleFor(x => x.Title)
+                .NotEmpty();
+            RuleFor(x => x.Year)
+                .LessThanOrEqualTo(DateTime.UtcNow.Year);
+            RuleFor(x => x.Slug)
+                .MustAsync(BeUniqueSlug)
+                .WithMessage("The movie already exists.");
+        }
+
+        private async Task<bool> BeUniqueSlug(string slug, CancellationToken cancellationToken)
+        {
+            var movie = await _movieRepository.GetBySlugAsync(slug);
+            return movie is null;
+        }
+    }
+    ```     
+
+3. Update `Services\MovireService.cs` to use the validator:
+    ```csharp
+    using FluentValidation;
+    using Movies.Application.Models;
+    using Movies.Application.Repositories;
+
+    namespace Movies.Application.Services;
+
+    public class MovieService : IMovieService
+    {
+        private readonly IMovieRepository _movieRepository;
+        private readonly IValidator<Movie> _movieValidator;
+
+        public MovieService(IMovieRepository movieRepository, IValidator<Movie> movieValidator)
+        {
+            _movieRepository = movieRepository;
+            _movieValidator = movieValidator;
+        }
+
+        public async Task<bool> CreateAsync(Movie movie)
+        {
+            await _movieValidator.ValidateAndThrowAsync(movie);
+            return await _movieRepository.CreateAsync(movie);
+        }
+
+        public async Task<bool> DeleteAsync(Guid id)
+        {
+            return await _movieRepository.DeleteAsync(id);
+        }
+
+        public async Task<IEnumerable<Movie>> GetAllAsync()
+        {
+            return await _movieRepository.GetAllAsync();
+        }
+
+        public async Task<Movie?> GetByIdAsync(Guid id)
+        {
+            return await _movieRepository.GetByIdAsync(id);
+        }
+
+        public async Task<Movie?> GetBySlugAsync(string id)
+        {
+            return await _movieRepository.GetBySlugAsync(id);
+        }
+
+        public async Task<Movie?> UpdateAsync(Movie movie)
+        {
+            await _movieValidator.ValidateAndThrowAsync(movie);
+            var exists = await _movieRepository.ExistByIdAsync(movie.Id);
+            if (exists)
+            {
+                if (await _movieRepository.UpdateAsync(movie))
+                {
+                    return movie;
+                }
+            }
+            return null;
+        }
+    }
+    ```    
+
+4. Create an assembly marker, that is used to mark the `Application` project when loading specific implemention within that assembly.
+    ```csharp
+    namespace Movies.Application;
+
+    public interface IApplicationMarker
+    {
+
+    }
+    ```
+
+5. Register all validators by updating the `ServiceExtension.cs` class:
+    ```csharp
+    using FluentValidation;
+    using Microsoft.Extensions.DependencyInjection;
+    using Movies.Application;
+    using Movies.Application.Database;
+    using Movies.Application.Repositories;
+    using Movies.Application.Services;
+
+    public static class ServiceExtension
+    {
+        public static IServiceCollection AddApplication(this IServiceCollection services)
+        {
+            services.AddSingleton<IMovieRepository, MovieRepository>();
+            services.AddSingleton<IMovieService, MovieService>();
+            // Validators are singleton as it is used in the services, i.e. the MovieService.cs which is a singleton.
+            services.AddValidatorsFromAssemblyContaining<IApplicationMarker>(ServiceLifetime.Singleton);
+            return services;
+        }
+
+        public static IServiceCollection AddDatabases(this IServiceCollection services, string connectionString)
+        {
+            // Note The factory is a singleton instance, but the CreateConnectionAsync method will create a new 
+            // connection for each request.
+            services.AddSingleton<IDatabaseConnectionFactory>(_ => new NpgSqlConnectionFactory(connectionString));
+            services.AddSingleton<DatabaseMigration>();
+            return services;
+        }
+    }
+    ```
+
+The service throws an exception if a validation failed. It is then up to the API to handle this and responed with the validation failure details. 
+
+Lets use a middleware to implement this.
+
+6. Add a middleware in `Mapping\ValidationMappingMiddleware.cs` 
+    ```csharp
+    using System.Text.Json;
+    using FluentValidation;
+    using Movies.Contracts.Responses;
+
+    namespace Movies.API.Mapping;
+
+    public class ValidationMappingMiddleware
+    {
+        private readonly RequestDelegate _next;
+
+        public ValidationMappingMiddleware(RequestDelegate next)
+        {
+            _next = next;
+        }
+
+        public async Task InvokeAsync(HttpContext context)
+        {
+            try
+            {
+                await _next(context);
+            }
+            catch (ValidationException ex)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                var validationFailureResponse = new ValidationFailureResponse
+                {
+                    Errors = ex.Errors.Select(x => new ValidationResponse { PropertyName = x.PropertyName, ErrorMessage = x.ErrorMessage })
+                };
+                await context.Response.WriteAsJsonAsync(validationFailureResponse);
+            }
+        }
+    }
+    ```
+7. Add `app.UseMiddleware<ValidationMappingMiddleware>();` to `Program.cs` 
+    ```csharp
+    using Movies.API.Mapping;
+    using Movies.Application.Database;
+
+    var builder = WebApplication.CreateBuilder(args);
+    var config = builder.Configuration;
+    // Add services to the container.
+
+    builder.Services.AddControllers();
+    // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddSwaggerGen();
+
+    builder.Services.AddApplication();
+    builder.Services.AddDatabases(config["Database:ConnectionString"]!);
+
+    var app = builder.Build();
+
+    // Configure the HTTP request pipeline.
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI();
+    }
+
+    app.UseHttpsRedirection();
+
+    app.UseAuthorization();
+
+    app.UseMiddleware<ValidationMappingMiddleware>();
+    app.MapControllers();
+
+    var dbMigration = app.Services.GetRequiredService<DatabaseMigration>();
+    await dbMigration.Migrate();
+
+    app.Run();
+
+    ```    
+
+8. Finally, create a new response type in the `Contract` project by adding file `Responses\ValidationFailureResponse.cs`
+    ```csharp
+    namespace Movies.Contracts.Responses;
+
+    public class ValidationFailureResponse
+    {
+        public required IEnumerable<ValidationResponse> Errors { get; init; } = Array.Empty<ValidationResponse>();
+    }
+
+    public class ValidationResponse
+    {
+        public required string PropertyName { get; init; }
+        public required string ErrorMessage { get; init; }
+    }
+    ```
+
+

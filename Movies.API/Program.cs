@@ -1,3 +1,4 @@
+using Movies.API.Mapping;
 using Movies.Application.Database;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -25,6 +26,7 @@ app.UseHttpsRedirection();
 
 app.UseAuthorization();
 
+app.UseMiddleware<ValidationMappingMiddleware>();
 app.MapControllers();
 
 var dbMigration = app.Services.GetRequiredService<DatabaseMigration>();

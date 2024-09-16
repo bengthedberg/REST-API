@@ -7,8 +7,8 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "Title": "Inception 4",
-  "Year": 2014,
+  "Title": "Inception",
+  "Year": 2024,
   "Genre": [
     "Action",
     "Adventure",
