@@ -803,170 +803,340 @@ dotnet add ./Movies.Application/Movies.Application.csproj package Npgsq
 ### Replace In-Memory Database
 
 1. Add a `ExistsByIdAsync` method to to the `Repositories\IMovieRepository.cs`
-  ```csharp
-  using Movies.Application.Models;
+    ```csharp
+    using Movies.Application.Models;
 
-  namespace Movies.Application.Repositories;
+    namespace Movies.Application.Repositories;
 
-  public interface IMovieRepository
-  {
-    Task<Movie?> GetByIdAsync(Guid id); 
-    Task<Movie?> GetBySlugAsync(string id); 
-    Task<IEnumerable<Movie>> GetAllAsync(); 
-    Task<bool> CreateAsync(Movie movie); // true if movie was created successfully
-    Task<bool> UpdateAsync(Movie movie); // true if movie was updated successfully
-    Task<bool> DeleteAsync(Guid id); // true if movie was deleted successfully
-    Task<bool> ExistByIdAsync(Guid id);
-  }
-  ```
+    public interface IMovieRepository
+    {
+      Task<Movie?> GetByIdAsync(Guid id); 
+      Task<Movie?> GetBySlugAsync(string id); 
+      Task<IEnumerable<Movie>> GetAllAsync(); 
+      Task<bool> CreateAsync(Movie movie); // true if movie was created successfully
+      Task<bool> UpdateAsync(Movie movie); // true if movie was updated successfully
+      Task<bool> DeleteAsync(Guid id); // true if movie was deleted successfully
+      Task<bool> ExistByIdAsync(Guid id);
+    }
+    ```
 
 2. Replace the `Repositories\MovieRepository.cs` class with this:
-  ```csharp
-  using Dapper;
-  using Movies.Application.Database;
-  using Movies.Application.Models;
+    ```csharp
+    using Dapper;
+    using Movies.Application.Database;
+    using Movies.Application.Models;
 
-  namespace Movies.Application.Repositories;
+    namespace Movies.Application.Repositories;
 
-  public class MovieRepository : IMovieRepository
-  {
-      private readonly IDatabaseConnectionFactory _connectionFactoryConnection;
+    public class MovieRepository : IMovieRepository
+    {
+        private readonly IDatabaseConnectionFactory _connectionFactoryConnection;
 
-      public MovieRepository(IDatabaseConnectionFactory databaseConnectionFactory)
-      {
-          _connectionFactoryConnection = databaseConnectionFactory;
+        public MovieRepository(IDatabaseConnectionFactory databaseConnectionFactory)
+        {
+            _connectionFactoryConnection = databaseConnectionFactory;
+        }
+
+        public async Task<bool> CreateAsync(Movie movie)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
+            // Use a transaction as we updates multiple tables in the database
+            using var transaction = connection.BeginTransaction();
+
+            var result = await connection.ExecuteAsync( new CommandDefinition("""
+                INSERT INTO movies (id, title, slug, year) VALUES (@Id, @Title, @Slug, @Year)
+                """, movie));
+            if (result > 0)
+            {
+                foreach (var genre in movie.Genre)
+                {
+                    result = await connection.ExecuteAsync( new CommandDefinition("""
+                        INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
+                        """, new { MovieId = movie.Id, Name = genre }));
+                }
+            }    
+
+            transaction.Commit();
+            return result > 0;
+        }
+
+        public async Task<bool> DeleteAsync(Guid id)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
+            var result = await connection.ExecuteAsync( new CommandDefinition("""
+                DELETE FROM movies WHERE id = @Id
+                """, new { Id = id }));
+            return result > 0;
+        }
+
+        public async Task<bool> ExistByIdAsync(Guid id)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
+            var exists = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
+                SELECT COUNT(*) FROM movies WHERE id = @Id
+                """, new { Id = id }));
+            return exists;
+        }
+
+        public async Task<IEnumerable<Movie>> GetAllAsync()
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
+            var result = await connection.QueryAsync(new CommandDefinition("""
+                SELECT m.*, string_agg(g.name, ',') as genres 
+                  FROM movies m LEFT JOIN genres g ON m.id = g.movieId GROUP BY id
+                """));
+            return result.Select(x => new Movie() {
+                Id = x.id,
+                Title = x.title,
+                Year = x.year,
+                Genre = Enumerable.ToList(x.genres.Split(','))
+            });
+        }
+
+        public async Task<Movie?> GetByIdAsync(Guid id)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
+            var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
+                SELECT * FROM movies WHERE id = @Id
+                """, new { Id = id }));
+            
+            if (movie is null)  return null;
+
+            var genres = await connection.QueryAsync<string>(new CommandDefinition("""
+                SELECT name FROM genres WHERE movieId = @MovieId
+                """, new { MovieId = id }));
+            foreach (var genre in genres)
+            {
+                movie.Genre.Add(genre);
+            }        
+        
+            return movie;
+        }
+
+        public async Task<Movie?> GetBySlugAsync(string id)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
+            var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
+                SELECT * FROM movies WHERE slug = @Slug
+                """, new { Slug = id }));
+
+            if (movie is null)  return null;
+
+            var genres = await connection.QueryAsync<string>(new CommandDefinition("""
+                SELECT name FROM genres WHERE movieId = @MovieId
+                """, new { MovieId = movie.Id }));
+            foreach (var genre in genres)
+            {
+                movie.Genre.Add(genre);
+            }        
+            
+            return movie;          
+        }
+
+        public async Task<bool> UpdateAsync(Movie movie)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
+            // Use a transaction as we updates multiple tables in the database
+            using var transaction = connection.BeginTransaction();        
+
+            await connection.ExecuteAsync( new CommandDefinition("""
+                DELETE FROM genres WHERE movieId = @Id
+                """, new { Id = movie.Id }));
+                
+            foreach (var genre in movie.Genre)
+            {
+                await connection.ExecuteAsync( new CommandDefinition("""
+                    INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
+                    """, new { MovieId = movie.Id, Name = genre }));
+            }
+
+            var result = await connection.ExecuteAsync( new CommandDefinition("""
+                UPDATE movies SET title = @Title, slug = @Slug, year = @Year WHERE id = @Id
+                """, movie));
+
+            transaction.Commit();
+
+            return result > 0;
+        }
       }
+      ```
 
-      public async Task<bool> CreateAsync(Movie movie)
-      {
-          using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
-          // Use a transaction as we updates multiple tables in the database
-          using var transaction = connection.BeginTransaction();
+## Add Business Logic
 
-          var result = await connection.ExecuteAsync( new CommandDefinition("""
-              INSERT INTO movies (id, title, slug, year) VALUES (@Id, @Title, @Slug, @Year)
-              """, movie));
-          if (result > 0)
-          {
-              foreach (var genre in movie.Genre)
-              {
-                  result = await connection.ExecuteAsync( new CommandDefinition("""
-                      INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
-                      """, new { MovieId = movie.Id, Name = genre }));
-              }
-          }    
+We need to introduce a service that manage the business logic. We do not want to add that logic in the existing repository as
+its responsibility is to persist the data in the database. We also do not waht this logic in the controller, resulting in *fat controllers*. 
 
-          transaction.Commit();
-          return result > 0;
-      }
+Add a service between the controller and the repository, where the business logic sits.
 
-      public async Task<bool> DeleteAsync(Guid id)
-      {
-          using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
-          var result = await connection.ExecuteAsync( new CommandDefinition("""
-              DELETE FROM movies WHERE id = @Id
-              """, new { Id = id }));
-          return result > 0;
-      }
+1. Add `Services\IMovieService.cs` 
+    ```csharp
+    using Movies.Application.Models;
 
-      public async Task<bool> ExistByIdAsync(Guid id)
-      {
-          using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
-          var exists = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
-              SELECT COUNT(*) FROM movies WHERE id = @Id
-              """, new { Id = id }));
-          return exists;
-      }
+    namespace Movies.Application.Services;
 
-      public async Task<IEnumerable<Movie>> GetAllAsync()
-      {
-          using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
-          var result = await connection.QueryAsync(new CommandDefinition("""
-              SELECT m.*, string_agg(g.name, ',') as genres 
-                FROM movies m LEFT JOIN genres g ON m.id = g.movieId GROUP BY id
-              """));
-          return result.Select(x => new Movie() {
-              Id = x.id,
-              Title = x.title,
-              Year = x.year,
-              Genre = Enumerable.ToList(x.genres.Split(','))
-          });
-      }
+    public interface IMovieService
+    {
+        Task<Movie?> GetByIdAsync(Guid id);
+        Task<Movie?> GetBySlugAsync(string id);
+        Task<IEnumerable<Movie>> GetAllAsync();
+        Task<bool> CreateAsync(Movie movie); // true if movie was created successfully
+        Task<Movie?> UpdateAsync(Movie movie); // true if movie was updated successfully
+        Task<bool> DeleteAsync(Guid id); // true if movie was deleted successfully
+    }
+    ```
 
-      public async Task<Movie?> GetByIdAsync(Guid id)
-      {
-          using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
-          var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
-              SELECT * FROM movies WHERE id = @Id
-              """, new { Id = id }));
-          
-          if (movie is null)  return null;
+2. Implement in interface in `Services\MovieService.cs`  
+    ```csharp
+    using Movies.Application.Models;
+    using Movies.Application.Repositories;
 
-          var genres = await connection.QueryAsync<string>(new CommandDefinition("""
-              SELECT name FROM genres WHERE movieId = @MovieId
-              """, new { MovieId = id }));
-          foreach (var genre in genres)
-          {
-              movie.Genre.Add(genre);
-          }        
-      
-          return movie;
-      }
+    namespace Movies.Application.Services;
 
-      public async Task<Movie?> GetBySlugAsync(string id)
-      {
-          using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
-          var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
-              SELECT * FROM movies WHERE slug = @Slug
-              """, new { Slug = id }));
+    public class MovieService : IMovieService
+    {
+        private readonly IMovieRepository _movieRepository;
 
-          if (movie is null)  return null;
+        public MovieService(IMovieRepository movieRepository)
+        {
+            _movieRepository = movieRepository;
+        }
 
-          var genres = await connection.QueryAsync<string>(new CommandDefinition("""
-              SELECT name FROM genres WHERE movieId = @MovieId
-              """, new { MovieId = movie.Id }));
-          foreach (var genre in genres)
-          {
-              movie.Genre.Add(genre);
-          }        
-          
-          return movie;          
-      }
+        public async Task<bool> CreateAsync(Movie movie)
+        {
+            return await _movieRepository.CreateAsync(movie);
+        }
 
-      public async Task<bool> UpdateAsync(Movie movie)
-      {
-          using var connection = await _connectionFactoryConnection.CreateConnectionAsync();
-          // Use a transaction as we updates multiple tables in the database
-          using var transaction = connection.BeginTransaction();        
+        public async Task<bool> DeleteAsync(Guid id)
+        {
+            return await _movieRepository.DeleteAsync(id);
+        }
 
-          await connection.ExecuteAsync( new CommandDefinition("""
-              DELETE FROM genres WHERE movieId = @Id
-              """, new { Id = movie.Id }));
-              
-          foreach (var genre in movie.Genre)
-          {
-              await connection.ExecuteAsync( new CommandDefinition("""
-                  INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
-                  """, new { MovieId = movie.Id, Name = genre }));
-          }
+        public async Task<IEnumerable<Movie>> GetAllAsync()
+        {
+            return await _movieRepository.GetAllAsync();
+        }
 
-          var result = await connection.ExecuteAsync( new CommandDefinition("""
-              UPDATE movies SET title = @Title, slug = @Slug, year = @Year WHERE id = @Id
-              """, movie));
+        public async Task<Movie?> GetByIdAsync(Guid id)
+        {
+            return await _movieRepository.GetByIdAsync(id);
+        }
 
-          transaction.Commit();
+        public async Task<Movie?> GetBySlugAsync(string id)
+        {
+            return await _movieRepository.GetBySlugAsync(id);
+        }
 
-          return result > 0;
-      }
-  }
+        public async Task<Movie?> UpdateAsync(Movie movie)
+        {
+            var exists = await _movieRepository.ExistByIdAsync(movie.Id);
+            if (exists)
+            {
+                if (await _movieRepository.UpdateAsync(movie))
+                {
+                    return movie;
+                }
+            }
+            return null;
+        }
+    }
+    ```
 
-  ```
+3. Add the service in the `ServiceExtension.cs`
+    ```csharp
+    using Microsoft.Extensions.DependencyInjection;
+    using Movies.Application.Database;
+    using Movies.Application.Repositories;
+    using Movies.Application.Services;
 
-  ## Add Business Logic
+    public static class ServiceExtension
+    {
+        public static IServiceCollection AddApplication(this IServiceCollection services)
+        {
+            services.AddSingleton<IMovieRepository, MovieRepository>();
+            services.AddSingleton<IMovieService, MovieService>();
+            return services;
+        }
 
-  We need to introduce a service that manage the business logic. We do not want to add that logic in the existing repository as
-  its responsibility is to persist the data in the database. We also do not waht this logic in the controller, resulting in *fat controllers*. 
+        public static IServiceCollection AddDatabases(this IServiceCollection services, string connectionString)
+        {
+            // Note The factory is a singleton instance, but the CreateConnectionAsync method will create a new 
+            // connection for each request.
+            services.AddSingleton<IDatabaseConnectionFactory>(_ => new NpgSqlConnectionFactory(connectionString));
+            services.AddSingleton<DatabaseMigration>();
+            return services;
+        }
+    }
+    ```
 
-  Add a service between the controller and the repository, where the business logic sits.
+4. Update the controller `MovieController.cs` to use the service instead of the repository:
+    ```csharp
+    using Microsoft.AspNetCore.Mvc;
+    using Movies.API.Mapping;
+    using Movies.Application.Services;
+    using Movies.Contracts.Requests;
 
-  
+    namespace Movies.API.Controllers;
+
+    [ApiController]
+    public class MovieController : ControllerBase
+    {
+        private readonly IMovieService _movieService;
+        public MovieController(IMovieService movieService)
+        {
+            _movieService = movieService;
+        }
+
+        [HttpPost(APIEndpoints.Movies.Create)]
+        public async Task<IActionResult> Create([FromBody] CreateMovieRequest request)
+        {
+            var movie = request.ToMovie();
+            await _movieService.CreateAsync(movie);
+            return CreatedAtAction(nameof(Get), new { identity = movie.Id },
+                movie.ToMovieResponse());
+        }
+
+        [HttpGet(APIEndpoints.Movies.Get)]
+        public async Task<IActionResult> Get([FromRoute] string identity)
+        {
+            var movie = Guid.TryParse(identity, out var id)
+                ? await _movieService.GetByIdAsync(id)
+                : await _movieService.GetBySlugAsync(identity);
+            if (movie is null)
+            {
+                return NotFound();
+            }
+            return Ok(movie.ToMovieResponse());
+        }
+
+        [HttpGet(APIEndpoints.Movies.GetAll)]
+        public async Task<IActionResult> GetAll()
+        {
+            var movies = await _movieService.GetAllAsync();
+            return Ok(movies.ToMoviesResponse());
+        }
+
+        [HttpPut(APIEndpoints.Movies.Update)]
+        public async Task<IActionResult> Update([FromRoute] Guid id, [FromBody] UpdateMovieRequest request)
+        {
+            var movie = request.ToMovie(id);
+            var updateMovie = await _movieService.UpdateAsync(movie);
+            if (updateMovie is null)
+            {
+                return NotFound();
+            }
+            return Ok(updateMovie.ToMovieResponse());
+        }
+
+        [HttpDelete(APIEndpoints.Movies.Delete)]
+        public async Task<IActionResult> Delete([FromRoute] Guid id)
+        {
+            var deleted = await _movieService.DeleteAsync(id);
+            if (!deleted)
+            {
+                return NotFound();
+            }
+            return NoContent();
+        }
+    }
+    ```
+
