@@ -1,0 +1,48 @@
+@baseURL = http://localhost:5181
+
+
+### Create a new movie (will fail 401 Unauthorized because of invalid JWT token)
+POST {{baseURL}}/api/movies
+Content-Type: application/json
+Authorization: Bearer dummy
+Accept: application/json
+
+{
+  "Title": "Inception",
+  "Year": 2010,
+  "Genre": [
+    "Action",
+    "Adventure"
+  ]
+}
+
+### Update movie (will fail 401 Unauthorized because of invalid JWT token)
+PUT {{baseURL}}/api/movies/3fa85f64-5717-4562-b3fc-2c963f66afa6
+Content-Type: application/json
+Authorization: Bearer dummy
+Accept: application/json
+
+{
+  "Title": "Inception 55",
+  "Year": 2011,
+  "Genre": [
+    "Kids",
+    "Action"
+  ]
+}
+
+### Get Movie using slug
+Get {{baseURL}}/api/movies/inception-55-2011
+Content-Type: application/json
+Accept: application/json
+
+### Get All Movies
+GET {{baseURL}}/api/movies
+Content-Type: application/json
+Accept: application/json
+
+### Delete a Movie using id, will fail 401 Unauthorized
+DELETE {{baseURL}}/api/movies/3fa85f64-5717-4562-b3fc-2c963f66afa6
+Content-Type: application/json
+Authorization: Bearer dummy
+Accept: application/json

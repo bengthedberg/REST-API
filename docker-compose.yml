@@ -10,3 +10,14 @@ services:
       - 5432:5432
     volumes:
       - ./data:/var/lib/postgresql/data
+
+  identity:
+    image: identity-api:latest
+    build:
+      context: .
+      dockerfile: Identity.API/Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:6001      
+    ports:
+      - 6001:6001

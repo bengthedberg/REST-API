@@ -20,7 +20,7 @@ dotnet new webapi -n Movies.API -o Movies.API -controllers
 dotnet new classlib -n Movies.Application -o Movies.Application
 dotnet new classlib -n Movies.Contracts -o Movies.Contract
 
-dotnet sln add **/*.csproj
+dotnet sln add (ls -r **/*.csproj)
 ```
 
 The API project will reference the Application library and the Contract library.
@@ -1754,3 +1754,192 @@ If not then you are really not managing the cancellation logic as you only cance
         }
     }
     ``` 
+
+## Authentication and Authorization
+
+**Authentication** is the process of verifying a user's identity to ensure they are who they claim to be. 
+
+> Verifying **WHO** the user is.
+
+**Authorization** is the process of granting the authenticated user permission to access specific resources or perform certain actions.
+
+> Verifying **WHAT** the user can do.
+
+REST API will use a token for this. The token itself is not created in this API, but rather a service specifically dceveloped for managing user authentication and access levels.  
+
+This API will only validate that user token (authentication) and check the policies in it to determine what the user is authorised to do.
+
+### JWT - JSON Web Token
+
+In its compact form, JSON Web Tokens consist of three parts separated by dots (.), which are:
+
+- Header
+- Payload
+- Signature
+
+Therefore, a JWT typically looks like the following.
+
+`xxxxx.yyyyy.zzzzz`
+
+#### Header
+The header typically consists of two parts: the type of the token, which is JWT, and the signing algorithm being used, such as HMAC SHA256 or RSA.
+
+
+#### Payload
+The second part of the token is the payload, which contains the claims. Claims are statements about an entity (typically, the user) and additional data.
+
+Some of the claims are standard claims and others are customisable. 
+
+> Do not put any secret data in the payload.
+
+
+#### Signature
+To create the signature part you have to take the encoded header, the encoded payload, a secret, the algorithm specified in the header, and sign that.
+
+**How do JSON Web Tokens work?**
+
+In authentication, when the user successfully logs in using their credentials, a JSON Web Token will be returned. 
+
+Whenever the user wants to access a protected route or resource, the user agent should send the JWT, typically in the **Authorization** header using the Bearer schema. 
+
+#### Pre-Requisite
+
+The `Identity.API` will dummy up a local identity server which will generate a valid JWT based on the request. This will be used in the `API` project. 
+
+#### Add Authentication using JWT
+
+1. Add required nuget packages to `API` project:
+    `dotnet add .\Movies.API\Movies.API.csproj package Microsoft.AspNetCore.Authentication.JwtBearer`
+
+2. Update the `Program.cs` file to configure and use authentication:
+    ```csharp
+    using System.Text;
+    using Microsoft.AspNetCore.Authentication.JwtBearer;
+    using Microsoft.IdentityModel.Tokens;
+    using Movies.API.Mapping;
+    using Movies.Application.Database;
+
+    var builder = WebApplication.CreateBuilder(args);
+    var config = builder.Configuration;
+    // Add services to the container.
+
+    builder.Services.AddAuthentication(x =>
+    {
+        x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        x.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        x.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+    }).AddJwtBearer(x =>
+    {
+        x.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,  // Check that the signing key is valid
+            ValidateLifetime = true,          // Check that the token is not expired
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["Jwt:Secret"]!)),
+            ValidateIssuer = true,
+            ValidIssuer = config["Jwt:Issuer"],
+            ValidateAudience = true,
+            ValidAudience = config["Jwt:Audience"]
+        };
+    });
+
+    builder.Services.AddAuthorization();
+
+    builder.Services.AddControllers();
+    // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddSwaggerGen();
+
+    builder.Services.AddApplication();
+    builder.Services.AddDatabases(config["Database:ConnectionString"]!);
+
+    var app = builder.Build();
+
+    // Configure the HTTP request pipeline.
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI();
+    }
+
+    app.UseHttpsRedirection();
+
+    app.UseAuthentication();
+    app.UseAuthorization();
+
+    app.UseMiddleware<ValidationMappingMiddleware>();
+    app.MapControllers();
+
+    var dbMigration = app.Services.GetRequiredService<DatabaseMigration>();
+    await dbMigration.Migrate();
+
+    app.Run();
+    ```
+
+3. Mark `MovieController.cs` to be accessible only for authorized users using the ` [Authorize]` attribute:
+    ```csharp
+    ...
+    namespace Movies.API.Controllers;
+
+    [ApiController]
+    [Authorize]
+    public class MovieController : ControllerBase
+    {
+        private readonly IMovieService _movieService;
+    ...
+
+    ```
+
+4. Make some endpoint publicly accessible using the `[AllowAnonymous]` attribute:
+    ```csharp
+
+        [HttpGet(APIEndpoints.Movies.GetAll)]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetAll(CancellationToken token)
+        {
+            var movies = await _movieService.GetAllAsync(token);
+            return Ok(movies.ToMoviesResponse());
+        }
+
+    ```    
+
+5. Add the confiration to `appsettings.json` (these values comes from the `Identity.API` project)
+    ```json
+        {
+        "Database" : {
+            "ConnectionString": "Server=localhost;Port=5432;Database=movies;User Id=demo;Password=demo;"
+        },
+        "Jwt": {
+            "Secret": "ThisSecretKeyIsOnlyUsedForLocalDevelopment",
+            "Issuer": "https://id.localhost.com",
+            "Audience": "https://movies.localhost.com"
+        },
+        "Logging": {
+            "LogLevel": {
+            "Default": "Information",
+            "Microsoft.AspNetCore": "Warning"
+            }
+        },
+        "AllowedHosts": "*"
+        }
+    ```
+
+
+#### Add Authorization using Claims
+
+Use claims to limit certain endpoints to users with specific roles.
+
+Limit the `Create`, `Delete` and `Update` to `Admin` users. 
+
+1. Add Policy to `Program.cs`
+    ```csharp
+    builder.Services.AddAuthorization(x => {
+        x.AddPolicy("Admin", p => p.RequireClaim("admin", "true"));    
+    });
+    ```
+
+2. Add the `[Authorize("Admin")]` attributes to the `Create`, `Delete` and `Update` endpoints. 
+
+
+
+
+

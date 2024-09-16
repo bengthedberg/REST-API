@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Movies.API.Mapping;
 using Movies.Application.Services;
@@ -15,6 +16,7 @@ public class MovieController : ControllerBase
     }
 
     [HttpPost(APIEndpoints.Movies.Create)]
+    [Authorize(APIAuthorizationConstants.TrustedUserPolicyName)]
     public async Task<IActionResult> Create([FromBody] CreateMovieRequest request, CancellationToken token)
     {
         var movie = request.ToMovie();
@@ -24,6 +26,7 @@ public class MovieController : ControllerBase
     }
 
     [HttpGet(APIEndpoints.Movies.Get)]
+    [AllowAnonymous]
     public async Task<IActionResult> Get([FromRoute] string identity, CancellationToken token)
     {
         var movie = Guid.TryParse(identity, out var id)
@@ -37,6 +40,7 @@ public class MovieController : ControllerBase
     }
 
     [HttpGet(APIEndpoints.Movies.GetAll)]
+    [AllowAnonymous]
     public async Task<IActionResult> GetAll(CancellationToken token)
     {
         var movies = await _movieService.GetAllAsync(token);
@@ -44,6 +48,7 @@ public class MovieController : ControllerBase
     }
 
     [HttpPut(APIEndpoints.Movies.Update)]
+    [Authorize(APIAuthorizationConstants.TrustedUserPolicyName)]
     public async Task<IActionResult> Update([FromRoute] Guid id, [FromBody] UpdateMovieRequest request, CancellationToken token)
     {
         var movie = request.ToMovie(id);
@@ -56,6 +61,7 @@ public class MovieController : ControllerBase
     }
 
     [HttpDelete(APIEndpoints.Movies.Delete)]
+    [Authorize(APIAuthorizationConstants.AdminUserPolicyName)]
     public async Task<IActionResult> Delete([FromRoute] Guid id, CancellationToken token)
     {
         var deleted = await _movieService.DeleteAsync(id, token);

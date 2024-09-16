@@ -1,0 +1,81 @@
+@baseURL = http://localhost:5181
+@identityURL = http://localhost:6001
+
+### Get a JWT Token for admin user
+# @name adminUser
+POST {{identityURL}}/api/Identity/token
+Content-Type: application/json
+Accept: application/json
+
+{
+  "userId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "email": "admin@test.com",
+  "customClaims": {
+    "admin": "false",
+    "trustedUser": "true"
+  }
+}
+
+### Save admin user JWT information
+@jwtTrustedToken = {{adminUser.response.body.token}}
+
+### Create a new movie
+# @name createMovie
+POST {{baseURL}}/api/movies
+Content-Type: application/json
+Authorization: Bearer {{jwtTrustedToken}}
+Accept: application/json
+
+{
+  "Title": "Inception Pre",
+  "Year": 2021,
+  "Genre": [
+    "Action",
+    "Adventure",
+    "Cinema",
+    "Thriller"
+  ]
+}
+
+### Save location information
+@location = {{createMovie.response.headers.Location}}
+
+### Get movie using location information
+# @name getMovie
+GET {{location}}
+Content-Type: application/json
+Accept: application/json
+
+### Save the movie id
+@movieId = {{getMovie.response.body.id}}
+
+### Update a Movie using id
+PUT {{baseURL}}/api/movies/{{movieId}}
+Content-Type: application/json
+Authorization: Bearer {{jwtTrustedToken}}
+Accept: application/json
+
+{
+  "Title": "Inception 5555",
+  "Year": 2011,
+  "Genre": [
+    "Kids",
+    "Action"
+  ]
+}
+
+### Get Movie using slug
+Get {{baseURL}}/api/movies/inception-555-2011
+Content-Type: application/json
+Accept: application/json
+
+### Get All Movies
+GET {{baseURL}}/api/movies
+Content-Type: application/json
+Accept: application/json
+
+### Delete a Movie using id, will fail as trusted users can not delete movies m403 Forbidden.
+DELETE {{baseURL}}/api/movies/{{movieId}}
+Content-Type: application/json
+Authorization: Bearer {{jwtTrustedToken}}
+Accept: application/json
