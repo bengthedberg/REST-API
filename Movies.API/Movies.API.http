@@ -44,7 +44,7 @@ Accept: application/json
 }
 
 ### Get Movie using slug
-Get {{baseURL}}/api/movies/inception-201
+Get {{baseURL}}/api/movies/inception-55-2011
 Content-Type: application/json
 Accept: application/json
 

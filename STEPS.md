@@ -1140,3 +1140,13 @@ Add a service between the controller and the repository, where the business logi
     }
     ```
 
+## Note 
+
+Currently we are *leaking* the `Movie` model to external clients through the API. Normally you would implement MediatR between the Contyroller and Service, using DTO objects instead of the `Movie` class directly.
+
+A Data Transfer Object is an object that is used to encapsulate data, and send it from one subsystem of an application to another.
+
+DTOs are most commonly used by the Services layer in an N-Tier application to transfer data between itself and the UI layer. By encapsulating the serialization like this, the DTOs keep this logic out of the rest of the code and also provide a clear point to change serialization should you wish.
+
+As this solution does not cover clean architecture, etc. then this will be ignored.
+
