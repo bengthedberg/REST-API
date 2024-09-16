@@ -15,39 +15,38 @@ public class MovieService : IMovieService
         _movieValidator = movieValidator;
     }
 
-    public async Task<bool> CreateAsync(Movie movie)
+    public async Task<bool> CreateAsync(Movie movie, CancellationToken token = default)
     {
-        await _movieValidator.ValidateAndThrowAsync(movie);
-        return await _movieRepository.CreateAsync(movie);
+        await _movieValidator.ValidateAndThrowAsync(movie, token);
+        return await _movieRepository.CreateAsync(movie, token);
     }
 
-    public async Task<bool> DeleteAsync(Guid id)
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken token = default)
     {
-        return await _movieRepository.DeleteAsync(id);
+        return await _movieRepository.DeleteAsync(id, token);
+    }
+    public async Task<IEnumerable<Movie>> GetAllAsync(CancellationToken token = default)
+    {
+        return await _movieRepository.GetAllAsync(token);
     }
 
-    public async Task<IEnumerable<Movie>> GetAllAsync()
+    public async Task<Movie?> GetByIdAsync(Guid id, CancellationToken token = default)
     {
-        return await _movieRepository.GetAllAsync();
+        return await _movieRepository.GetByIdAsync(id, token);
     }
 
-    public async Task<Movie?> GetByIdAsync(Guid id)
+    public async Task<Movie?> GetBySlugAsync(string id, CancellationToken token = default)
     {
-        return await _movieRepository.GetByIdAsync(id);
+        return await _movieRepository.GetBySlugAsync(id, token);
     }
 
-    public async Task<Movie?> GetBySlugAsync(string id)
+    public async Task<Movie?> UpdateAsync(Movie movie, CancellationToken token = default)
     {
-        return await _movieRepository.GetBySlugAsync(id);
-    }
-
-    public async Task<Movie?> UpdateAsync(Movie movie)
-    {
-        await _movieValidator.ValidateAndThrowAsync(movie);
-        var exists = await _movieRepository.ExistByIdAsync(movie.Id);
+        await _movieValidator.ValidateAndThrowAsync(movie, token);
+        var exists = await _movieRepository.ExistByIdAsync(movie.Id, token);
         if (exists)
         {
-            if (await _movieRepository.UpdateAsync(movie))
+            if (await _movieRepository.UpdateAsync(movie, token))
             {
                 return movie;
             }

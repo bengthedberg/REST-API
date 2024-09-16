@@ -1397,4 +1397,360 @@ Lets use a middleware to implement this.
     }
     ```
 
+## Cancellation Token
 
+For a REST API a cancellation token is triggered when the client cancel an ongoing request.
+
+If you handle these cancellation then it is important that the cancellation token is progressed through the calls, i.e. from the controller to the service and then to the repository and any outstanding database requests.
+If not then you are really not managing the cancellation logic as you only cancel some steps.
+
+1. Add `CancellationToken` to all endpoints and pass that down to the movie service:
+    ```csharp
+    using Microsoft.AspNetCore.Mvc;
+    using Movies.API.Mapping;
+    using Movies.Application.Services;
+    using Movies.Contracts.Requests;
+
+    namespace Movies.API.Controllers;
+
+    [ApiController]
+    public class MovieController : ControllerBase
+    {
+        private readonly IMovieService _movieService;
+        public MovieController(IMovieService movieService)
+        {
+            _movieService = movieService;
+        }
+
+        [HttpPost(APIEndpoints.Movies.Create)]
+        public async Task<IActionResult> Create([FromBody] CreateMovieRequest request, CancellationToken token)
+        {
+            var movie = request.ToMovie();
+            await _movieService.CreateAsync(movie, token);
+            return CreatedAtAction(nameof(Get), new { identity = movie.Id },
+                movie.ToMovieResponse());
+        }
+
+        [HttpGet(APIEndpoints.Movies.Get)]
+        public async Task<IActionResult> Get([FromRoute] string identity, CancellationToken token)
+        {
+            var movie = Guid.TryParse(identity, out var id)
+                ? await _movieService.GetByIdAsync(id, token)
+                : await _movieService.GetBySlugAsync(identity, token);
+            if (movie is null)
+            {
+                return NotFound();
+            }
+            return Ok(movie.ToMovieResponse());
+        }
+
+        [HttpGet(APIEndpoints.Movies.GetAll)]
+        public async Task<IActionResult> GetAll(CancellationToken token)
+        {
+            var movies = await _movieService.GetAllAsync(token);
+            return Ok(movies.ToMoviesResponse());
+        }
+
+        [HttpPut(APIEndpoints.Movies.Update)]
+        public async Task<IActionResult> Update([FromRoute] Guid id, [FromBody] UpdateMovieRequest request, CancellationToken token)
+        {
+            var movie = request.ToMovie(id);
+            var updateMovie = await _movieService.UpdateAsync(movie, token);
+            if (updateMovie is null)
+            {
+                return NotFound();
+            }
+            return Ok(updateMovie.ToMovieResponse());
+        }
+
+        [HttpDelete(APIEndpoints.Movies.Delete)]
+        public async Task<IActionResult> Delete([FromRoute] Guid id, CancellationToken token)
+        {
+            var deleted = await _movieService.DeleteAsync(id, token);
+            if (!deleted)
+            {
+                return NotFound();
+            }
+            return NoContent();
+        }
+    }
+
+    ```
+
+2. Update the `IMovieService.cs` to accept the cancellation tokens
+    ```csharp
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Services;
+
+    public interface IMovieService
+    {
+        Task<Movie?> GetByIdAsync(Guid id, CancellationToken token = default);
+        Task<Movie?> GetBySlugAsync(string id, CancellationToken token = default);
+        Task<IEnumerable<Movie>> GetAllAsync(CancellationToken token = default);
+        Task<bool> CreateAsync(Movie movie, CancellationToken token = default); // true if movie was created successfully
+        Task<Movie?> UpdateAsync(Movie movie, CancellationToken token = default); // true if movie was updated successfully
+        Task<bool> DeleteAsync(Guid id, CancellationToken token = default); // true if movie was deleted successfully
+    }
+
+    ```
+
+3. Manage the token in the `MovieService`, basically accept the token and pass it to validation and repositories.
+    ```csharp
+    using FluentValidation;
+    using Movies.Application.Models;
+    using Movies.Application.Repositories;
+
+    namespace Movies.Application.Services;
+
+    public class MovieService : IMovieService
+    {
+        private readonly IMovieRepository _movieRepository;
+        private readonly IValidator<Movie> _movieValidator;
+
+        public MovieService(IMovieRepository movieRepository, IValidator<Movie> movieValidator)
+        {
+            _movieRepository = movieRepository;
+            _movieValidator = movieValidator;
+        }
+
+        public async Task<bool> CreateAsync(Movie movie, CancellationToken token = default)
+        {
+            await _movieValidator.ValidateAndThrowAsync(movie, token);
+            return await _movieRepository.CreateAsync(movie, token);
+        }
+
+        public async Task<bool> DeleteAsync(Guid id, CancellationToken token = default)
+        {
+            return await _movieRepository.DeleteAsync(id, token);
+        }
+        public async Task<IEnumerable<Movie>> GetAllAsync(CancellationToken token = default)
+        {
+            return await _movieRepository.GetAllAsync(token);
+        }
+
+        public async Task<Movie?> GetByIdAsync(Guid id, CancellationToken token = default)
+        {
+            return await _movieRepository.GetByIdAsync(id, token);
+        }
+
+        public async Task<Movie?> GetBySlugAsync(string id, CancellationToken token = default)
+        {
+            return await _movieRepository.GetBySlugAsync(id, token);
+        }
+
+        public async Task<Movie?> UpdateAsync(Movie movie, CancellationToken token = default)
+        {
+            await _movieValidator.ValidateAndThrowAsync(movie, token);
+            var exists = await _movieRepository.ExistByIdAsync(movie.Id, token);
+            if (exists)
+            {
+                if (await _movieRepository.UpdateAsync(movie, token))
+                {
+                    return movie;
+                }
+            }
+            return null;
+        }
+    }
+
+    ```
+
+4. Update the `IMovieRepository.cs` to accept tokens:
+    ```csharp
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Repositories;
+
+    public interface IMovieRepository
+    {
+    Task<Movie?> GetByIdAsync(Guid id, CancellationToken token = default);
+    Task<Movie?> GetBySlugAsync(string id, CancellationToken token = default);
+    Task<IEnumerable<Movie>> GetAllAsync(CancellationToken token = default);
+    Task<bool> CreateAsync(Movie movie, CancellationToken token = default); // true if movie was created successfully
+    Task<bool> UpdateAsync(Movie movie, CancellationToken token = default); // true if movie was updated successfully
+    Task<bool> DeleteAsync(Guid id, CancellationToken token = default); // true if movie was deleted successfully
+    Task<bool> ExistByIdAsync(Guid id, CancellationToken token = default);
+    }
+    ```
+
+5. Modify the `MovireRepository.cs` to accept and pass the toekn to Dapper.
+    ```csharp
+    using Dapper;
+    using Movies.Application.Database;
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Repositories;
+
+    public class MovieRepository : IMovieRepository
+    {
+        private readonly IDatabaseConnectionFactory _connectionFactoryConnection;
+
+        public MovieRepository(IDatabaseConnectionFactory databaseConnectionFactory)
+        {
+            _connectionFactoryConnection = databaseConnectionFactory;
+        }
+
+        public async Task<bool> CreateAsync(Movie movie, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            // Use a transaction as we updates multiple tables in the database
+            using var transaction = connection.BeginTransaction();
+
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                INSERT INTO movies (id, title, slug, year) VALUES (@Id, @Title, @Slug, @Year)
+                """, movie, cancellationToken: token));
+            if (result > 0)
+            {
+                foreach (var genre in movie.Genre)
+                {
+                    result = await connection.ExecuteAsync(new CommandDefinition("""
+                        INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
+                        """, new { MovieId = movie.Id, Name = genre }));
+                }
+            }
+
+            transaction.Commit();
+            return result > 0;
+        }
+
+        public async Task<bool> DeleteAsync(Guid id, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                DELETE FROM movies WHERE id = @Id
+                """, new { Id = id }, cancellationToken: token));
+            return result > 0;
+        }
+
+        public async Task<bool> ExistByIdAsync(Guid id, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var exists = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
+                SELECT COUNT(*) FROM movies WHERE id = @Id
+                """, new { Id = id }, cancellationToken: token));
+            return exists;
+        }
+
+        public async Task<IEnumerable<Movie>> GetAllAsync(CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var result = await connection.QueryAsync(new CommandDefinition("""
+                SELECT m.*, string_agg(g.name, ',') as genres 
+                FROM movies m LEFT JOIN genres g ON m.id = g.movieId GROUP BY id
+                """, cancellationToken: token));
+            return result.Select(x => new Movie()
+            {
+                Id = x.id,
+                Title = x.title,
+                Year = x.year,
+                Genre = Enumerable.ToList(x.genres.Split(','))
+            });
+        }
+
+        public async Task<Movie?> GetByIdAsync(Guid id, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
+                SELECT * FROM movies WHERE id = @Id
+                """, new { Id = id }, cancellationToken: token));
+
+            if (movie is null) return null;
+
+            var genres = await connection.QueryAsync<string>(new CommandDefinition("""
+                SELECT name FROM genres WHERE movieId = @MovieId
+                """, new { MovieId = id }, cancellationToken: token));
+            foreach (var genre in genres)
+            {
+                movie.Genre.Add(genre);
+            }
+
+            return movie;
+        }
+
+        public async Task<Movie?> GetBySlugAsync(string id, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
+                SELECT * FROM movies WHERE slug = @Slug
+                """, new { Slug = id }, cancellationToken: token));
+
+            if (movie is null) return null;
+
+            var genres = await connection.QueryAsync<string>(new CommandDefinition("""
+                SELECT name FROM genres WHERE movieId = @MovieId
+                """, new { MovieId = movie.Id }, cancellationToken: token));
+            foreach (var genre in genres)
+            {
+                movie.Genre.Add(genre);
+            }
+
+            return movie;
+        }
+
+        public async Task<bool> UpdateAsync(Movie movie, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            // Use a transaction as we updates multiple tables in the database
+            using var transaction = connection.BeginTransaction();
+
+            await connection.ExecuteAsync(new CommandDefinition("""
+                DELETE FROM genres WHERE movieId = @Id
+                """, new { Id = movie.Id }, cancellationToken: token));
+
+            foreach (var genre in movie.Genre)
+            {
+                await connection.ExecuteAsync(new CommandDefinition("""
+                    INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
+                    """, new { MovieId = movie.Id, Name = genre }, cancellationToken: token));
+            }
+
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                UPDATE movies SET title = @Title, slug = @Slug, year = @Year WHERE id = @Id
+                """, movie, cancellationToken: token));
+
+            transaction.Commit();
+
+            return result > 0;
+        }
+    }
+
+    ```
+
+6. Also add the cancellation toekn when we create database connections:
+
+- `IDatabaseConnectionFactory.cs`
+    ```csharp
+    using System.Data;
+
+    namespace Movies.Application.Database;
+
+    public interface IDatabaseConnectionFactory
+    {
+        Task<IDbConnection> CreateConnectionAsync(CancellationToken token = default);
+    }
+    ```
+- `NpgSqlConnectionFactory.cs`
+    ```csharp
+    using System.Data;
+    using Npgsql;
+
+    namespace Movies.Application.Database;
+
+    public class NpgSqlConnectionFactory : IDatabaseConnectionFactory
+    {
+        private readonly string _connectionString;
+
+        public NpgSqlConnectionFactory(string connectionString)
+        {
+            _connectionString = connectionString;
+        }
+
+        public async Task<IDbConnection> CreateConnectionAsync(CancellationToken token = default)
+        {
+            var connection = new NpgsqlConnection(_connectionString);
+            await connection.OpenAsync(token);
+            return connection;
+        }
+    }
+    ``` 
