@@ -2807,6 +2807,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
         }
     }
     ```
+
 3. Add a new request `RateMovieRequest.cs`
     ```csharp
     namespace Movies.Contracts.Requests;
@@ -2865,8 +2866,6 @@ A user comes from the JWT token and a rating id done through a specific endpoint
         }
 
     }
-
-
     ```
 
 5. Update the `ContractMappings.cs`
@@ -2889,4 +2888,269 @@ A user comes from the JWT token and a rating id done through a specific endpoint
 6. Update `ServiceExtension.cs` 
     ```csharp
         services.AddSingleton<IRatingService, RatingService>();
+    ```
+
+## Return All Ratings for a User
+
+1. Start by adding anew model
+    `Models\MovieRating.cs`
+    ```csharp
+    using System;
+
+    namespace Movies.Application.Models;
+
+    public class MovieRating
+    {
+        public required Guid MovieId { get; init; }
+        public required string Slug { get; init; }
+        public required int Rating { get; init; }
+    }
+    ```
+   
+2. Add some new Contracts
+    `Responses\MovieRatingResponse.cs`
+    ```csharp
+    namespace Movies.Contracts.Responses;
+
+    public class MovieRatingResponse
+    {
+        public required Guid MovieId { get; init; }
+        public required string Slug { get; init; }
+        public required int Rating { get; init; }
+    }
+    ```
+    `Responses\MovieRatingsResponse.cs`
+    ```csharp
+    namespace Movies.Contracts.Responses;
+
+    public class MovieRatingsResponse
+    {
+        public IEnumerable<MovieRatingResponse> MovieRatings { get; init; } = Enumerable.Empty<MovieRatingResponse>();
+    }
+    ```
+
+3. Update the Rating Repository
+    `Repository\IRatingRepository.cs`
+    ```csharp
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Repositories;
+
+    public interface IRatingRepository
+    {
+        Task<bool> UpsertRatingAsync(Guid movieId, Guid userId, int rating, CancellationToken token = default);
+        Task<bool> DeleteRatingAsync(Guid movieId, Guid userId, CancellationToken token = default);
+        Task<float?> GetRatingAsync(Guid movieId, CancellationToken token = default);
+        Task<(float? Rating, int? UserRating)> GetRatingAsync(Guid movieId, Guid userId, CancellationToken token = default);
+        Task<IEnumerable<MovieRating>> GetRatingsByUserAsync(Guid userId, CancellationToken token = default);
+    }
+    ```
+    `Repository\RatingRepository.cs`
+    ```csharp
+    using Dapper;
+    using Movies.Application.Database;
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Repositories;
+
+    public class RatingRepository : IRatingRepository
+    {
+        private readonly IDatabaseConnectionFactory _connectionFactoryConnection;
+
+        public RatingRepository(IDatabaseConnectionFactory databaseConnectionFactory)
+        {
+            _connectionFactoryConnection = databaseConnectionFactory;
+        }
+
+        public async Task<bool> UpsertRatingAsync(Guid movieId, Guid userId, int rating, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                        INSERT INTO ratings (userId, movieId, rating) VALUES (@UserId, @MovieId, @Rating)
+                        ON CONFLICT (userId, movieId) DO UPDATE SET rating = @Rating
+                        """, new { UserId = userId, MovieId = movieId, Rating = rating }, cancellationToken: token));
+            return result > 0;
+        }
+
+        public async Task<bool> DeleteRatingAsync(Guid movieId, Guid userId, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                        DELETE FROM ratings WHERE movieId = @MovieId AND userId = @UserId
+                        """, new { MovieId = movieId, UserId = userId }, cancellationToken: token));
+            return result > 0;
+        }
+
+        public async Task<float?> GetRatingAsync(Guid movieId, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            return await connection.QuerySingleOrDefaultAsync<float?>(new CommandDefinition("""
+                SELECT round(avg(rating), 1) FROM ratings WHERE id = @MovieId                      
+                """, new { MovieId = movieId }, cancellationToken: token));
+        }
+
+        public async Task<(float? Rating, int? UserRating)> GetRatingAsync(Guid movieId, Guid userId, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            return await connection.QuerySingleOrDefaultAsync<(float? Rating, int? UserRating)>(new CommandDefinition("""
+                SELECT round(avg(r.rating), 1) as rating, min(ur.rating) as userrating 
+                FROM movies m
+                LEFT JOIN ratings ur ON m.id = ur.movieId AND ur.userId = @UserId 
+                LEFT JOIN ratings r ON m.id = r.movieId 
+                WHERE m.id = @MovieId                     
+                """, new { MovieId = movieId, @UserId = userId }, cancellationToken: token));
+        }
+
+        public async Task<IEnumerable<MovieRating>> GetRatingsByUserAsync(Guid userId, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var result = await connection.QueryAsync(new CommandDefinition("""
+                SELECT m.id as movieid, m.slug as slug, r.rating as rating
+                FROM movies m
+                JOIN ratings r ON m.id = r.movieId
+                WHERE r.userId = @UserId
+                """, new { UserId = userId }, cancellationToken: token));
+            return result.Select(r => new MovieRating()
+            {
+                MovieId = r.movieid,
+                Slug = r.slug,
+                Rating = (int)r.rating
+            });
+        }
+    }
+    ```
+
+4. Udpaet the Repository Service
+    `Services\IRatingServices.cs`
+    ```csharp
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Services;
+
+    public interface IRatingService
+    {
+        Task<bool> RateMovieAsync(Guid movieId, Guid userId, int rating, CancellationToken token = default);
+        Task<bool> DeleteRatingAsync(Guid movieId, Guid userId, CancellationToken token = default);
+        Task<IEnumerable<MovieRating>> GetRatingsByUserAsync(Guid userId, CancellationToken token = default);
+    }
+    ```
+    `Services\RatingServices.cs`
+    ```csharp
+    using System.Runtime.CompilerServices;
+    using FluentValidation;
+    using FluentValidation.Results;
+    using Movies.Application.Models;
+    using Movies.Application.Repositories;
+
+    namespace Movies.Application.Services;
+
+    public class RatingService : IRatingService
+    {
+        private readonly IRatingRepository _ratingRepository;
+        private readonly IMovieRepository _movieRepository;
+
+
+        public RatingService(IRatingRepository ratingRepository, IMovieRepository movieRepository)
+        {
+            _ratingRepository = ratingRepository;
+            _movieRepository = movieRepository;
+        }
+
+        public async Task<bool> DeleteRatingAsync(Guid movieId, Guid userId, CancellationToken token = default)
+        {
+            var movieExists = await _movieRepository.ExistByIdAsync(movieId, token);
+            if (!movieExists)
+            {
+                return false;
+            }
+            return await _ratingRepository.DeleteRatingAsync(movieId, userId, token);
+        }
+
+        public async Task<IEnumerable<MovieRating>> GetRatingsByUserAsync(Guid userId, CancellationToken token = default)
+        {
+            return await _ratingRepository.GetRatingsByUserAsync(userId, token);
+        }
+
+        public async Task<bool> RateMovieAsync(Guid movieId, Guid userId, int rating, CancellationToken token = default)
+        {
+            if (rating < 1 || rating > 5)
+            {
+                throw new ValidationException([
+                    new ValidationFailure("rating", "Rating must be between 1 and 5")
+                ]);
+            }
+            if (userId == Guid.Empty)
+            {
+                throw new ValidationException([
+                    new ValidationFailure("userId", "User ID must be provided")
+                ]);
+            }
+            var movieExists = await _movieRepository.ExistByIdAsync(movieId, token);
+            if (!movieExists)
+            {
+                return false;
+            }
+
+            return await _ratingRepository.UpsertRatingAsync(movieId, userId, rating, token);
+        }
+    }
+    ```
+
+5. Update the Rating Controller
+    ```csharp
+    using Microsoft.AspNetCore.Authorization;
+    using Microsoft.AspNetCore.Mvc;
+    using Movies.API.Auth;
+    using Movies.API.Mapping;
+    using Movies.Application.Services;
+    using Movies.Contracts.Requests;
+
+    namespace Movies.API.Controllers;
+
+
+    [ApiController]
+    public class RatingController : ControllerBase
+    {
+        private readonly IRatingService _ratingService;
+        public RatingController(IRatingService ratingService)
+        {
+            _ratingService = ratingService;
+        }
+
+        [Authorize]
+        [HttpPost(APIEndpoints.Movies.Rating)]
+        public async Task<IActionResult> Rating([FromRoute] Guid id, [FromBody] RateMovieRequest request, CancellationToken token)
+        {
+            var userId = HttpContext.GetUserId();
+            var success = await _ratingService.RateMovieAsync(id, userId!.Value, request.Rating, token);
+            if (!success)
+            {
+                return NotFound();
+            }
+            return Ok();
+        }
+
+
+        [Authorize]
+        [HttpDelete(APIEndpoints.Movies.DeleteRating)]
+        public async Task<IActionResult> DeleteRating([FromRoute] Guid id, CancellationToken token)
+        {
+            var userId = HttpContext.GetUserId();
+            var success = await _ratingService.DeleteRatingAsync(id, userId!.Value, token);
+            if (!success)
+            {
+                return NotFound();
+            }
+            return NoContent();
+        }
+
+        [Authorize]
+        [HttpGet(APIEndpoints.Rating.GetUserRatings)]
+        public async Task<IActionResult> GetUserRatings([FromRoute] Guid id, CancellationToken token)
+        {
+            var userId = HttpContext.GetUserId();
+            var result = await _ratingService.GetRatingsByUserAsync(userId!.Value, token);
+            return Ok(result.ToMovieRatingsResponse());
+        }
+    }
     ```

@@ -80,6 +80,13 @@ Accept: application/json
   ]
 }
 
+
+### Get My Ratings
+Get {{baseURL}}/api/rating/me
+Content-Type: application/json
+Authorization: Bearer {{jwtTrustedToken}}
+Accept: application/json
+
 ### Get Movie using slug
 Get {{baseURL}}/api/movies/inception-prep-2021
 Content-Type: application/json

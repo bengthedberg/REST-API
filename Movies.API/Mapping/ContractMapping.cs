@@ -41,14 +41,29 @@ public static class ContractMapping
       Genre = movie.Genre
     };
   }
-
-
   public static MoviesResponse ToMoviesResponse(this IEnumerable<Movie> movies)
   {
     return new MoviesResponse()
     {
       Movies = movies.Select(ToMovieResponse)
     };
+  }
 
+  public static MovieRatingResponse ToMovieRatingResponse(this MovieRating movieRating)
+  {
+    return new MovieRatingResponse()
+    {
+      MovieId = movieRating.MovieId,
+      Slug = movieRating.Slug,
+      Rating = movieRating.Rating
+    };
+  }
+
+  public static MovieRatingsResponse ToMovieRatingsResponse(this IEnumerable<MovieRating> movieRatings)
+  {
+    return new MovieRatingsResponse()
+    {
+      MovieRatings = movieRatings.Select(ToMovieRatingResponse)
+    };
   }
 }
