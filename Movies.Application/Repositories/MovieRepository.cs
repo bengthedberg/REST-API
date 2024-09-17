@@ -28,7 +28,7 @@ public class MovieRepository : IMovieRepository
             {
                 result = await connection.ExecuteAsync(new CommandDefinition("""
                     INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
-                    """, new { MovieId = movie.Id, Name = genre }));
+                    """, new { MovieId = movie.Id, Name = genre }, cancellationToken: token));
             }
         }
 
@@ -58,7 +58,7 @@ public class MovieRepository : IMovieRepository
     {
         using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
         var result = await connection.QueryAsync(new CommandDefinition("""
-            SELECT m.*, string_agg(distinct g.name, ',') as genres, round(avg(r.rating), 2) as rating, min(ur.rating) as userrating  
+            SELECT m.*, string_agg(distinct g.name, ',') as genres, round(avg(r.rating), 1) as rating, min(ur.rating) as userrating  
             FROM movies m 
              LEFT JOIN genres g ON m.id = g.movieId 
              LEFT JOIN ratings ur ON m.id = ur.movieId AND ur.userId = @UserId 
@@ -80,7 +80,7 @@ public class MovieRepository : IMovieRepository
     {
         using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
         var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
-            SELECT m.*, round(avg(r.rating), 2) as rating, min(ur.rating) as userrating 
+            SELECT m.*, round(avg(r.rating), 1) as rating, min(ur.rating) as userrating 
             FROM movies m
              LEFT JOIN ratings ur ON m.id = ur.movieId AND ur.userId = @UserId 
              LEFT JOIN ratings r ON m.id = r.movieId 

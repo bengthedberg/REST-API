@@ -8,7 +8,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "userId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "userId": "3fc85f64-5717-4562-b3fc-2c963f66afa6",
   "email": "admin@test.com",
   "customClaims": {
     "admin": "false",
@@ -27,7 +27,7 @@ Authorization: Bearer {{jwtTrustedToken}}
 Accept: application/json
 
 {
-  "Title": "Inception Pre",
+  "Title": "Inception Prep",
   "Year": 2021,
   "Genre": [
     "Action",
@@ -49,6 +49,22 @@ Accept: application/json
 ### Save the movie id
 @movieId = {{getMovie.response.body.id}}
 
+### Rate the movie
+POST {{baseURL}}/api/movies/{{movieId}}/rating
+Content-Type: application/json
+Authorization: Bearer {{jwtTrustedToken}}
+Accept: application/json
+
+{
+  "Rating": "5"
+}
+
+### Delete the rating
+DELETE {{baseURL}}/api/movies/{{movieId}}/rating
+Content-Type: application/json
+Authorization: Bearer {{jwtTrustedToken}}
+Accept: application/json
+
 ### Update a Movie using id
 PUT {{baseURL}}/api/movies/{{movieId}}
 Content-Type: application/json
@@ -56,7 +72,7 @@ Authorization: Bearer {{jwtTrustedToken}}
 Accept: application/json
 
 {
-  "Title": "Inception 5555",
+  "Title": "Inception 555dd5",
   "Year": 2011,
   "Genre": [
     "Kids",
@@ -65,7 +81,7 @@ Accept: application/json
 }
 
 ### Get Movie using slug
-Get {{baseURL}}/api/movies/inception-555-2011
+Get {{baseURL}}/api/movies/inception-prep-2021
 Content-Type: application/json
 Accept: application/json
 

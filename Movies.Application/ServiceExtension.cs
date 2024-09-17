@@ -10,6 +10,7 @@ public static class ServiceExtension
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddSingleton<IRatingRepository, RatingRepository>();
+        services.AddSingleton<IRatingService, RatingService>();
         services.AddSingleton<IMovieRepository, MovieRepository>();
         services.AddSingleton<IMovieService, MovieService>();
         // Validators are singleton as it is used in the services, i.e. the MovieService.cs which is a singleton.
