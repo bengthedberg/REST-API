@@ -4,11 +4,11 @@ namespace Movies.Application.Database;
 public class DatabaseMigration
 {
 
-  private readonly IDatabaseConnectionFactory _connectionFactory; 
+  private readonly IDatabaseConnectionFactory _connectionFactory;
 
   public DatabaseMigration(IDatabaseConnectionFactory connectionFactory)
   {
-      _connectionFactory = connectionFactory;
+    _connectionFactory = connectionFactory;
   }
 
   public async Task Migrate()
@@ -23,20 +23,30 @@ public class DatabaseMigration
         year INTEGER NOT NULL
     );
     """);
-  await connection.ExecuteAsync(
-    """
+    await connection.ExecuteAsync(
+      """
     CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_movies_slug ON movies USING btree(slug);
     """);
 
-  await connection.ExecuteAsync(
-    """
+    await connection.ExecuteAsync(
+      """
     CREATE TABLE IF NOT EXISTS genres (
         movieId UUID REFERENCES movies(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         PRIMARY KEY(movieId, name)
     );
     """);
-      
-  }    
+
+    await connection.ExecuteAsync(
+      """
+    CREATE TABLE IF NOT EXISTS ratings (
+        userId UUID NOT NULL,
+        movieId UUID REFERENCES movies(id) ON DELETE CASCADE,
+        rating INTEGER NOT NULL,
+        PRIMARY KEY(userId, movieId)
+    );
+    """);
+
+  }
 
 }

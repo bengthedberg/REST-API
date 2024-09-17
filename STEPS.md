@@ -1940,6 +1940,734 @@ Limit the `Create`, `Delete` and `Update` to `Admin` users.
 2. Add the `[Authorize("Admin")]` attributes to the `Create`, `Delete` and `Update` endpoints. 
 
 
+## Add User Rating
+
+A user can rate a movie from 1 to 5. 
+
+A user comes from the JWT token and a rating id done through a specific endpoint.
+
+1. Add the required endpoints by modifying `APIEndpoints.cs`.
+    ```csharp
+        namespace Movies.API;
+
+        public static class APIEndpoints
+        {
+        private const string BaseURL = "/api"; 
+
+        public static class Movies 
+        {
+            private const string Base = $"{BaseURL}/movies";
+
+            public const string Create = Base;
+            public const string GetAll = Base;
+            public const string Get = $"{Base}/{{identity}}";
+            public const string Update = $"{Base}/{{id:guid}}";
+            public const string Delete = $"{Base}/{{id:guid}}";
+            public const string AddRating = $"{Base}/{{id:guid}}/rating";
+            public const string DeleteRating = $"{Base}/{{id:guid}}/rating";    
+        }
+
+        public static class Rating
+        {
+            private const string Base = $"{BaseURL}/rating";
+            public const string GetUserRatings =  $"{Base}/me";
+        }
+
+        }
+    ```
+
+    We need an endpoint for creating and adding ratings for a specific movie.
+
+    We also need a different endpoint to get all ratings for a user.
+
+2. Modify the response to return ratings for the user as well as average rating. These are optional. 
+    `Responses\MovieResponse.cs`
+    ```csharp
+        namespace Movies.Contracts.Responses;
+
+        public class MovieResponse
+        {
+        public required Guid Id { get; init; }
+        public required string Title { get; init; }
+        public required string Slug { get; init; }
+        public required int Year { get; init; }
+        public int? UserRating { get; init; }
+        public float? AverageRating { get; init; }
+        public required IEnumerable<string> Genre { get; init; } = Enumerable.Empty<string>();
+
+        }
+    ```
+3. Add a new rating table in the database by adding the following to `Database\DatabaseMigration.cs`
+    ```csharp
+        await connection.ExecuteAsync(
+            """
+            CREATE TABLE IF NOT EXISTS ratings (
+                userId UUID NOT NULL,
+                movieId UUID REFERENCES movies(id) ON DELETE CASCADE,
+                rating INTEGER NOT NULL,
+                PRIMARY KEY(userId, movieId)
+            );
+            """);    
+    ```
+
+4. Grab the user id from the JWT by adding a new extension method called `IdentityExtension`
+    ```csharp
+    namespace Movies.API.Auth;
+
+    public static class IdentityExtension
+    {
+        public static Guid? GetUserId(this HttpContext httpContext)
+        {
+            var userId = httpContext.User.Claims.SingleOrDefault(c => c.Type == APIAuthorizationConstants.UserIdClaimName)?.Value;
+            if (userId == null)
+            {
+                return null;
+            }
+
+            return Guid.Parse(userId);
+        }
+    }
+    ```
+
+    Note that we added `UserIdClaimName` to `APIAuthorizationConstants` 
+    ```csharp
+        public const string UserIdClaimName = "userid";
+    ```
+
+5. Extend the `MovieController` to get current user and pass it to the service and repository :
+    `IMovieService.cs` 
+    ```csharp
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Services;
+
+    public interface IMovieService
+    {
+        Task<Movie?> GetByIdAsync(Guid id, Guid? userId = default, CancellationToken token = default);
+        Task<Movie?> GetBySlugAsync(string id, Guid? userId = default, CancellationToken token = default);
+        Task<IEnumerable<Movie>> GetAllAsync(Guid? userId = default, CancellationToken token = default);
+        Task<bool> CreateAsync(Movie movie, CancellationToken token = default); // true if movie was created successfully
+        Task<Movie?> UpdateAsync(Movie movie, Guid? userId = default, CancellationToken token = default); // true if movie was updated successfully
+        Task<bool> DeleteAsync(Guid id, CancellationToken token = default); // true if movie was deleted successfully
+    }
+    ```
+    `MovieController.cs`
+    ```csharp
+    using Microsoft.AspNetCore.Authorization;
+    using Microsoft.AspNetCore.Mvc;
+    using Movies.API.Auth;
+    using Movies.API.Mapping;
+    using Movies.Application.Services;
+    using Movies.Contracts.Requests;
+
+    namespace Movies.API.Controllers;
+
+    [ApiController]
+    public class MovieController : ControllerBase
+    {
+        private readonly IMovieService _movieService;
+        public MovieController(IMovieService movieService)
+        {
+            _movieService = movieService;
+        }
+
+        [HttpPost(APIEndpoints.Movies.Create)]
+        [Authorize(APIAuthorizationConstants.TrustedUserPolicyName)]
+        public async Task<IActionResult> Create([FromBody] CreateMovieRequest request, CancellationToken token)
+        {
+            var movie = request.ToMovie();
+            await _movieService.CreateAsync(movie, token);
+            return CreatedAtAction(nameof(Get), new { identity = movie.Id },
+                movie.ToMovieResponse());
+        }
+
+        [HttpGet(APIEndpoints.Movies.Get)]
+        [AllowAnonymous]
+        public async Task<IActionResult> Get([FromRoute] string identity, CancellationToken token)
+        {
+            var userId = HttpContext.GetUserId();
+            var movie = Guid.TryParse(identity, out var id)
+                ? await _movieService.GetByIdAsync(id, userId, token)
+                : await _movieService.GetBySlugAsync(identity, userId, token);
+            if (movie is null)
+            {
+                return NotFound();
+            }
+            return Ok(movie.ToMovieResponse());
+        }
+
+        [HttpGet(APIEndpoints.Movies.GetAll)]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetAll(CancellationToken token)
+        {
+            var userId = HttpContext.GetUserId();
+            var movies = await _movieService.GetAllAsync(userId, token);
+            return Ok(movies.ToMoviesResponse());
+        }
+
+        [HttpPut(APIEndpoints.Movies.Update)]
+        [Authorize(APIAuthorizationConstants.TrustedUserPolicyName)]
+        public async Task<IActionResult> Update([FromRoute] Guid id, [FromBody] UpdateMovieRequest request, CancellationToken token)
+        {
+            var userId = HttpContext.GetUserId();
+            var movie = request.ToMovie(id);
+            var updateMovie = await _movieService.UpdateAsync(movie, userId, token);
+            if (updateMovie is null)
+            {
+                return NotFound();
+            }
+            return Ok(updateMovie.ToMovieResponse());
+        }
+
+        [HttpDelete(APIEndpoints.Movies.Delete)]
+        [Authorize(APIAuthorizationConstants.AdminUserPolicyName)]
+        public async Task<IActionResult> Delete([FromRoute] Guid id, CancellationToken token)
+        {
+            var deleted = await _movieService.DeleteAsync(id, token);
+            if (!deleted)
+            {
+                return NotFound();
+            }
+            return NoContent();
+        }
+    }
+    
+    ```
+
+    `IMovieRepository.cs`
+    ```csharp
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Repositories;
+
+    public interface IMovieRepository
+    {
+    Task<Movie?> GetByIdAsync(Guid id, Guid? userId = default, CancellationToken token = default);
+    Task<Movie?> GetBySlugAsync(string id, Guid? userId = default, CancellationToken token = default);
+    Task<IEnumerable<Movie>> GetAllAsync(Guid? userId = default, CancellationToken token = default);
+    Task<bool> CreateAsync(Movie movie, CancellationToken token = default); // true if movie was created successfully
+    Task<bool> UpdateAsync(Movie movie, Guid? userId = default, CancellationToken token = default); // true if movie was updated successfully
+    Task<bool> DeleteAsync(Guid id, CancellationToken token = default); // true if movie was deleted successfully
+    Task<bool> ExistByIdAsync(Guid id, CancellationToken token = default);
+    }
+    ```
+
+    `MovieService.cs`
+    ```csharp
+    using FluentValidation;
+    using Movies.Application.Models;
+    using Movies.Application.Repositories;
+
+    namespace Movies.Application.Services;
+
+    public class MovieService : IMovieService
+    {
+        private readonly IMovieRepository _movieRepository;
+        private readonly IValidator<Movie> _movieValidator;
+
+        public MovieService(IMovieRepository movieRepository, IValidator<Movie> movieValidator)
+        {
+            _movieRepository = movieRepository;
+            _movieValidator = movieValidator;
+        }
+
+        public async Task<bool> CreateAsync(Movie movie, CancellationToken token = default)
+        {
+            await _movieValidator.ValidateAndThrowAsync(movie, token);
+            return await _movieRepository.CreateAsync(movie, token);
+        }
+
+        public async Task<bool> DeleteAsync(Guid id, CancellationToken token = default)
+        {
+            return await _movieRepository.DeleteAsync(id, token);
+        }
+        public async Task<IEnumerable<Movie>> GetAllAsync(Guid? userId = default, CancellationToken token = default)
+        {
+            return await _movieRepository.GetAllAsync(userId, token);
+        }
+
+        public async Task<Movie?> GetByIdAsync(Guid id, Guid? userId = default, CancellationToken token = default)
+        {
+            return await _movieRepository.GetByIdAsync(id, userId, token);
+        }
+
+        public async Task<Movie?> GetBySlugAsync(string id, Guid? userId = default, CancellationToken token = default)
+        {
+            return await _movieRepository.GetBySlugAsync(id, userId, token);
+        }
+
+        public async Task<Movie?> UpdateAsync(Movie movie, Guid? userId = default, CancellationToken token = default)
+        {
+            await _movieValidator.ValidateAndThrowAsync(movie, token);
+            var exists = await _movieRepository.ExistByIdAsync(movie.Id, token);
+            if (exists)
+            {
+                if (await _movieRepository.UpdateAsync(movie, userId, token))
+                {
+                    return movie;
+                }
+            }
+            return null;
+        }
+    }
+
+    ```
+
+    `MovieRepository.cs`
+    ```csharp
+    using Dapper;
+    using Movies.Application.Database;
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Repositories;
+
+    public class MovieRepository : IMovieRepository
+    {
+        private readonly IDatabaseConnectionFactory _connectionFactoryConnection;
+
+        public MovieRepository(IDatabaseConnectionFactory databaseConnectionFactory)
+        {
+            _connectionFactoryConnection = databaseConnectionFactory;
+        }
+
+        public async Task<bool> CreateAsync(Movie movie, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            // Use a transaction as we updates multiple tables in the database
+            using var transaction = connection.BeginTransaction();
+
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                INSERT INTO movies (id, title, slug, year) VALUES (@Id, @Title, @Slug, @Year)
+                """, movie, cancellationToken: token));
+            if (result > 0)
+            {
+                foreach (var genre in movie.Genre)
+                {
+                    result = await connection.ExecuteAsync(new CommandDefinition("""
+                        INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
+                        """, new { MovieId = movie.Id, Name = genre }));
+                }
+            }
+
+            transaction.Commit();
+            return result > 0;
+        }
+
+        public async Task<bool> DeleteAsync(Guid id, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                DELETE FROM movies WHERE id = @Id
+                """, new { Id = id }, cancellationToken: token));
+            return result > 0;
+        }
+
+        public async Task<bool> ExistByIdAsync(Guid id, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var exists = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
+                SELECT COUNT(*) FROM movies WHERE id = @Id
+                """, new { Id = id }, cancellationToken: token));
+            return exists;
+        }
+
+        public async Task<IEnumerable<Movie>> GetAllAsync(Guid? userId = default, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var result = await connection.QueryAsync(new CommandDefinition("""
+                SELECT m.*, string_agg(g.name, ',') as genres 
+                FROM movies m LEFT JOIN genres g ON m.id = g.movieId GROUP BY id
+                """, cancellationToken: token));
+            return result.Select(x => new Movie()
+            {
+                Id = x.id,
+                Title = x.title,
+                Year = x.year,
+                Genre = Enumerable.ToList(x.genres.Split(','))
+            });
+        }
+
+        public async Task<Movie?> GetByIdAsync(Guid id, Guid? userId = default, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
+                SELECT * FROM movies WHERE id = @Id
+                """, new { Id = id }, cancellationToken: token));
+
+            if (movie is null) return null;
+
+            var genres = await connection.QueryAsync<string>(new CommandDefinition("""
+                SELECT name FROM genres WHERE movieId = @MovieId
+                """, new { MovieId = id }, cancellationToken: token));
+            foreach (var genre in genres)
+            {
+                movie.Genre.Add(genre);
+            }
+
+            return movie;
+        }
+
+        public async Task<Movie?> GetBySlugAsync(string id, Guid? userId = default, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
+                SELECT * FROM movies WHERE slug = @Slug
+                """, new { Slug = id }, cancellationToken: token));
+
+            if (movie is null) return null;
+
+            var genres = await connection.QueryAsync<string>(new CommandDefinition("""
+                SELECT name FROM genres WHERE movieId = @MovieId
+                """, new { MovieId = movie.Id }, cancellationToken: token));
+            foreach (var genre in genres)
+            {
+                movie.Genre.Add(genre);
+            }
+
+            return movie;
+        }
+
+        public async Task<bool> UpdateAsync(Movie movie, Guid? userId = default, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            // Use a transaction as we updates multiple tables in the database
+            using var transaction = connection.BeginTransaction();
+
+            await connection.ExecuteAsync(new CommandDefinition("""
+                DELETE FROM genres WHERE movieId = @Id
+                """, new { Id = movie.Id }, cancellationToken: token));
+
+            foreach (var genre in movie.Genre)
+            {
+                await connection.ExecuteAsync(new CommandDefinition("""
+                    INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
+                    """, new { MovieId = movie.Id, Name = genre }, cancellationToken: token));
+            }
+
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                UPDATE movies SET title = @Title, slug = @Slug, year = @Year WHERE id = @Id
+                """, movie, cancellationToken: token));
+
+            transaction.Commit();
+
+            return result > 0;
+        }
+    }
+    ```
+
+6. Extend the domain model `Movie.cs`:
+   ```csharp
+    namespace Movies.Application.Models;
+
+    public class Movie
+    {
+        public required Guid Id { get; init; }
+        public required string Title { get; set; }
+        public string Slug => GetSlug();  
+        public required int Year { get; set; }
+
+        public int? UserRating { get; set; }
+        public float? Rating { get; set; }
+
+        public required List<string> Genre { get; init; } = new();    
+
+        private string GetSlug()
+        {
+            return Title.ToLower().Replace(" ", "-") + "-" + Year.ToString();
+        }
+    }
+
+   ```
+7. Add a Rating Repository :
+    `Repository\IRatingRepository.cs`
+    ```csharp
+    namespace Movies.Application.Repositories;
+
+    public interface IRatingRepository
+    {
+        Task<float?> GetRatingAsync(Guid movieId, CancellationToken token = default);
+        Task<(float? Rating, int? UserRating)> GetRatingAsync(Guid movieId, Guid userId, CancellationToken token = default);
+    }
+    ```
+
+    `Repository\RatingRepository.cs`
+    ```csharp
+    using Dapper;
+    using Movies.Application.Database;
+
+    namespace Movies.Application.Repositories;
+
+    public class RatingRepository : IRatingRepository
+    {
+        private readonly IDatabaseConnectionFactory _connectionFactoryConnection;
+
+        public RatingRepository(IDatabaseConnectionFactory databaseConnectionFactory)
+        {
+            _connectionFactoryConnection = databaseConnectionFactory;
+        }
+
+        public async Task<float?> GetRatingAsync(Guid movieId, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            return await connection.QuerySingleOrDefaultAsync<float?>(new CommandDefinition("""
+                SELECT round(avg(rating), 1) FROM ratings WHERE id = @MovieId                      
+                """, new { MovieId = movieId }, cancellationToken: token));
+        }
+
+        public async Task<(float? Rating, int? UserRating)> GetRatingAsync(Guid movieId, Guid userId, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            return await connection.QuerySingleOrDefaultAsync<(float? Rating, int? UserRating)>(new CommandDefinition("""
+                SELECT round(avg(r.rating), 1) as rating, ur.rating as userrating 
+                FROM movies m
+                LEFT JOIN ratings ur ON m.id = r.movieId AND r.userId = @UserId 
+                LEFT JOIN ratings r ON m.id = r.movieId 
+                WHERE id = @MovieId                     
+                """, new { MovieId = movieId, @UserId = userId }, cancellationToken: token));
+        }
+    }
+    ```
+
+8. Add RatingRepository to Depencency Injections, `ServiceExtension.cs`
+    ```csharp
+        public static IServiceCollection AddApplication(this IServiceCollection services)
+        {
+            services.AddSingleton<IRatingRepository, RatingRepository>();
+            services.AddSingleton<IMovieRepository, MovieRepository>();
+            services.AddSingleton<IMovieService, MovieService>();
+            // Validators are singleton as it is used in the services, i.e. the MovieService.cs which is a singleton.
+            services.AddValidatorsFromAssemblyContaining<IApplicationMarker>(ServiceLifetime.Singleton);
+            return services;
+        }
+    ```    
+
+9. Add rating functionality to repository `MovieRepository.cs`:
+   ```csharp
+    using Dapper;
+    using Movies.Application.Database;
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Repositories;
+
+    public class MovieRepository : IMovieRepository
+    {
+        private readonly IDatabaseConnectionFactory _connectionFactoryConnection;
+
+        public MovieRepository(IDatabaseConnectionFactory databaseConnectionFactory)
+        {
+            _connectionFactoryConnection = databaseConnectionFactory;
+        }
+
+        public async Task<bool> CreateAsync(Movie movie, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            // Use a transaction as we updates multiple tables in the database
+            using var transaction = connection.BeginTransaction();
+
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                INSERT INTO movies (id, title, slug, year) VALUES (@Id, @Title, @Slug, @Year)
+                """, movie, cancellationToken: token));
+            if (result > 0)
+            {
+                foreach (var genre in movie.Genre)
+                {
+                    result = await connection.ExecuteAsync(new CommandDefinition("""
+                        INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
+                        """, new { MovieId = movie.Id, Name = genre }));
+                }
+            }
+
+            transaction.Commit();
+            return result > 0;
+        }
+
+        public async Task<bool> DeleteAsync(Guid id, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                DELETE FROM movies WHERE id = @Id
+                """, new { Id = id }, cancellationToken: token));
+            return result > 0;
+        }
+
+        public async Task<bool> ExistByIdAsync(Guid id, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var exists = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
+                SELECT COUNT(*) FROM movies WHERE id = @Id
+                """, new { Id = id }, cancellationToken: token));
+            return exists;
+        }
+
+        public async Task<IEnumerable<Movie>> GetAllAsync(Guid? userId = default, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var result = await connection.QueryAsync(new CommandDefinition("""
+                SELECT m.*, string_agg(distinct g.name, ',') as genres, round(avg(r.rating), 2) as rating, ur.rating as userrating  
+                FROM movies m 
+                LEFT JOIN genres g ON m.id = g.movieId 
+                LEFT JOIN ratings ur ON m.id = r.movieId AND r.userId = @UserId 
+                LEFT JOIN ratings r ON m.id = r.movieId              
+                GROUP BY id
+                """, new { UserId = userId }, cancellationToken: token));
+            return result.Select(x => new Movie()
+            {
+                Id = x.id,
+                Title = x.title,
+                Year = x.year,
+                Rating = (float?)x.rating,
+                UserRating = (int?)x.userrating,
+                Genre = Enumerable.ToList(x.genres.Split(','))
+            });
+        }
+
+        public async Task<Movie?> GetByIdAsync(Guid id, Guid? userId = default, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
+                SELECT m.*, round(avg(r.rating), 2) as rating, ur.rating as userrating 
+                FROM movies m
+                LEFT JOIN ratings ur ON m.id = r.movieId AND r.userId = @UserId 
+                LEFT JOIN ratings r ON m.id = r.movieId 
+                WHERE id = @Id 
+                """, new { Id = id, UserId = userId }, cancellationToken: token));
+
+            if (movie is null) return null;
+
+            var genres = await connection.QueryAsync<string>(new CommandDefinition("""
+                SELECT name FROM genres WHERE movieId = @MovieId
+                """, new { MovieId = id }, cancellationToken: token));
+            foreach (var genre in genres)
+            {
+                movie.Genre.Add(genre);
+            }
+
+            return movie;
+        }
+
+        public async Task<Movie?> GetBySlugAsync(string id, Guid? userId = default, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var movie = await connection.QueryFirstOrDefaultAsync<Movie>(new CommandDefinition("""
+                SELECT m.*, round(avg(r.rating), 2) as rating, ur.rating as userrating 
+                FROM movies m
+                LEFT JOIN ratings ur ON m.id = r.movieId AND r.userId = @UserId 
+                LEFT JOIN ratings r ON m.id = r.movieId 
+                WHERE id = @Id 
+                """, new { Id = id, UserId = userId }, cancellationToken: token));
+
+            if (movie is null) return null;
+
+            var genres = await connection.QueryAsync<string>(new CommandDefinition("""
+                SELECT name FROM genres WHERE movieId = @MovieId
+                """, new { MovieId = movie.Id }, cancellationToken: token));
+            foreach (var genre in genres)
+            {
+                movie.Genre.Add(genre);
+            }
+
+            return movie;
+        }
+
+        public async Task<bool> UpdateAsync(Movie movie, Guid? userId = default, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            // Use a transaction as we updates multiple tables in the database
+            using var transaction = connection.BeginTransaction();
+
+            await connection.ExecuteAsync(new CommandDefinition("""
+                DELETE FROM genres WHERE movieId = @Id
+                """, new { Id = movie.Id }, cancellationToken: token));
+
+            foreach (var genre in movie.Genre)
+            {
+                await connection.ExecuteAsync(new CommandDefinition("""
+                    INSERT INTO genres (movieId, name) VALUES (@MovieId, @Name)
+                    """, new { MovieId = movie.Id, Name = genre }, cancellationToken: token));
+            }
+
+            var result = await connection.ExecuteAsync(new CommandDefinition("""
+                UPDATE movies SET title = @Title, slug = @Slug, year = @Year WHERE id = @Id
+                """, movie, cancellationToken: token));
+
+            transaction.Commit();
+
+            return result > 0;
+        }
+    }    
+   ```
+
+10. Add RatingRepository to our `MovieService.cs` 
+    ```csharp
+    using FluentValidation;
+    using Movies.Application.Models;
+    using Movies.Application.Repositories;
+
+    namespace Movies.Application.Services;
+
+    public class MovieService : IMovieService
+    {
+        private readonly IMovieRepository _movieRepository;
+        private readonly IValidator<Movie> _movieValidator;
+        private readonly IRatingRepository _ratingRepository;
+
+        public MovieService(IMovieRepository movieRepository, IValidator<Movie> movieValidator, IRatingRepository ratingRepository)
+        {
+            _movieRepository = movieRepository;
+            _movieValidator = movieValidator;
+            _ratingRepository = ratingRepository;
+        }
+
+        public async Task<bool> CreateAsync(Movie movie, CancellationToken token = default)
+        {
+            await _movieValidator.ValidateAndThrowAsync(movie, token);
+            return await _movieRepository.CreateAsync(movie, token);
+        }
+
+        public async Task<bool> DeleteAsync(Guid id, CancellationToken token = default)
+        {
+            return await _movieRepository.DeleteAsync(id, token);
+        }
+        public async Task<IEnumerable<Movie>> GetAllAsync(Guid? userId = default, CancellationToken token = default)
+        {
+            return await _movieRepository.GetAllAsync(userId, token);
+        }
+
+        public async Task<Movie?> GetByIdAsync(Guid id, Guid? userId = default, CancellationToken token = default)
+        {
+            return await _movieRepository.GetByIdAsync(id, userId, token);
+        }
+
+        public async Task<Movie?> GetBySlugAsync(string id, Guid? userId = default, CancellationToken token = default)
+        {
+            return await _movieRepository.GetBySlugAsync(id, userId, token);
+        }
+
+        public async Task<Movie?> UpdateAsync(Movie movie, Guid? userId = default, CancellationToken token = default)
+        {
+            await _movieValidator.ValidateAndThrowAsync(movie, token);
+            var exists = await _movieRepository.ExistByIdAsync(movie.Id, token);
+            if (!exists)
+            {
+                return null;
+            }
+
+            await _movieRepository.UpdateAsync(movie, userId, token);
+
+            if (userId.HasValue)
+            {
+                (movie.Rating, movie.UserRating) = await _ratingRepository.GetRatingAsync(movie.Id, userId.Value, token);
+            }
+            else
+            {
+                movie.Rating = await _ratingRepository.GetRatingAsync(movie.Id, token);
+            }
+
+            return movie;
+        }
+    }
+    ```
+
 
 
 

@@ -1,4 +1,4 @@
-namespace Movies.API;
+namespace Movies.API.Auth;
 
 public static class APIAuthorizationConstants
 {
@@ -7,4 +7,6 @@ public static class APIAuthorizationConstants
 
     public const string TrustedUserPolicyName = "TrustedUser";
     public const string TrustedUserClaimName = "trustedUser";
+
+    public const string UserIdClaimName = "userid";
 }

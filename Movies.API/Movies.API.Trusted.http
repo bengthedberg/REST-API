@@ -72,6 +72,7 @@ Accept: application/json
 ### Get All Movies
 GET {{baseURL}}/api/movies
 Content-Type: application/json
+Authorization: Bearer {{jwtTrustedToken}}
 Accept: application/json
 
 ### Delete a Movie using id, will fail as trusted users can not delete movies m403 Forbidden.

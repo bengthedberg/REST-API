@@ -6,6 +6,8 @@ public class MovieResponse
   public required string Title { get; init; }
   public required string Slug { get; init; }
   public required int Year { get; init; }
-  public required IEnumerable<string> Genre { get; init; } = Enumerable.Empty<string>();    
+  public int? UserRating { get; init; }
+  public float? AverageRating { get; init; }
+  public required IEnumerable<string> Genre { get; init; } = Enumerable.Empty<string>();
 
 }
