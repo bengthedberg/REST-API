@@ -1,6 +1,7 @@
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
 using Movies.API.Auth;
 using Movies.API.Mapping;
 using Movies.Application.Services;
@@ -14,9 +15,11 @@ namespace Movies.API.Controllers;
 public class MovieController : ControllerBase
 {
     private readonly IMovieService _movieService;
-    public MovieController(IMovieService movieService)
+    private readonly IOutputCacheStore _outputCacheStore;
+    public MovieController(IMovieService movieService, IOutputCacheStore outputCacheStore)
     {
         _movieService = movieService;
+        _outputCacheStore = outputCacheStore;
     }
 
     [HttpPost(APIEndpoints.Movies.Create)]
@@ -27,12 +30,15 @@ public class MovieController : ControllerBase
     {
         var movie = request.ToMovie();
         await _movieService.CreateAsync(movie, token);
+        await _outputCacheStore.EvictByTagAsync("MovieCache", token);
         return CreatedAtAction(nameof(Get), new { identity = movie.Id },
             movie.ToMovieResponse());
     }
 
     [HttpGet(APIEndpoints.Movies.Get)]
     [AllowAnonymous]
+    [OutputCache(PolicyName = "MovieCache")]
+    [ResponseCache(Duration = 60, VaryByHeader = "api-version, Accept-Encoding, Accept", Location = ResponseCacheLocation.Client)]
     [ProducesResponseType(typeof(MovieResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Get([FromRoute] string identity, CancellationToken token)
@@ -50,6 +56,8 @@ public class MovieController : ControllerBase
 
     [HttpGet(APIEndpoints.Movies.GetAll)]
     [AllowAnonymous]
+    [OutputCache(PolicyName = "MovieCache")]
+    [ResponseCache(Duration = 60, VaryByQueryKeys = new[] { "title", "year", "sortBy", "page", "pageSize" }, VaryByHeader = "api-version, Accept-Encoding, Accept", Location = ResponseCacheLocation.Client)]
     [ProducesResponseType(typeof(MoviesResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll([FromQuery] GetAllMoviesRequest request, CancellationToken token)
     {
@@ -75,6 +83,7 @@ public class MovieController : ControllerBase
         {
             return NotFound();
         }
+        await _outputCacheStore.EvictByTagAsync("MovieCache", token);
         return Ok(updateMovie.ToMovieResponse());
     }
 
@@ -89,6 +98,7 @@ public class MovieController : ControllerBase
         {
             return NotFound();
         }
+        await _outputCacheStore.EvictByTagAsync("MovieCache", token);
         return NoContent();
     }
 }

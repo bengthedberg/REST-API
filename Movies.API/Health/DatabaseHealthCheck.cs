@@ -27,7 +27,7 @@ public class DatabaseHealthCheck : IHealthCheck
         }
         catch (Exception ex)
         {
-            _logger.LogError("Database health check failed", ex);
+            _logger.LogError(ex, "Database health check failed");
             return HealthCheckResult.Unhealthy(ex.Message);
         }
 

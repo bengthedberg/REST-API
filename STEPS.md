@@ -3909,3 +3909,111 @@ An API has an health check endpoint that returns the health of the service. The 
     builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>(DatabaseHealthCheck.Name);
     ```
+## Caching
+
+Caching is a mechanism for storing frequently accessed data in a temporary storage area called a cache. 
+
+There are 2 different type of caching:
+
+- Response Caching
+- Output Caching
+
+**Response Caching** reduces the number of requests a client or proxy makes to a web server. Response caching also reduces the amount of work the web server performs to generate a response. Response caching is set in headers. This is controlled by the client as it 
+
+**Output Caching** is a strategy utilized in .NET to cache frequently accessed data, primarily aimed at enhancing performance. By mitigating repetitive requests to resource-intensive dependencies, such as databases or network calls, we can significantly enhance our application’s response times. 
+
+The most significant difference is that ResponseCache is to cache on the client side, while OutputCache is on the server side. Assuming you're firing the same request from two different browsers, you won't benefit from ResponseCache but OutputCache. Of course, using OutputCache will consume your server-side resources but with ResponseCache, you don't have to worry about it.
+
+
+### Output Caching
+
+1. Add the folloing to `Program.cs`     
+    ```csharp
+    builder.Services.AddOutputCache(x =>
+    {
+        x.AddBasePolicy(c => c.Cache());
+        x.AddPolicy("MovieCache", c =>
+        {
+            c.Cache()
+                .Expire(TimeSpan.FromMinutes(1))
+                .SetVaryByQuery(new string[] { "title", "year", "sortBy", "page", "pageSize" })
+                .Tag("Movie");
+        });
+    });
+    ```
+    ```csharp
+    //app.UseCQRS();
+    app.UseOutputCache();  // Must be after UseCQRS
+    ```
+
+ 2. Update the `MovieController.cs`      
+    - Inject a cachestore so we can invalidate the cache if need to
+        ```csharp
+        private readonly IMovieService _movieService;
+        private readonly IOutputCacheStore _outputCacheStore;
+        public MovieController(IMovieService movieService, IOutputCacheStore outputCacheStore)
+        {
+            _movieService = movieService;
+            _outputCacheStore = outputCacheStore;
+        }
+        ```
+    - Add Attribute `[OutputCache(PolicyName = "MovieCache")]` to endpoint that should use cache    
+        ```csharp
+            [HttpGet(APIEndpoints.Movies.GetAll)]
+            [AllowAnonymous]
+            [OutputCache(PolicyName = "MovieCache")]
+            [ProducesResponseType(typeof(MoviesResponse), StatusCodes.Status200OK)]
+            public async Task<IActionResult> GetAll([FromQuery] GetAllMoviesRequest request, CancellationToken token)
+            {
+                var userId = HttpContext.GetUserId();
+                var options = request.ToGetAllMoviesOptions().WithUserId(userId);
+                var movies = await _movieService.GetAllAsync(options, token);
+                var count = await _movieService.GetCountAsync(request.Title, request.Year, token);
+
+                return Ok(movies.ToMoviesResponse(request.Page, request.PageSize, count));
+            }
+        ```    
+
+    - Invalidate cache when data has been modified by calling ` await _outputCacheStore.EvictByTagAsync("MovieCache", token);`      
+        ```csharp  
+        [HttpPost(APIEndpoints.Movies.Create)]
+        [Authorize(APIAuthorizationConstants.TrustedUserPolicyName)]
+        [ProducesResponseType(typeof(MovieResponse), StatusCodes.Status201Created)]
+        [ProducesResponseType(typeof(ValidationFailureResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> Create([FromBody] CreateMovieRequest request, CancellationToken token)
+        {
+            var movie = request.ToMovie();
+            await _movieService.CreateAsync(movie, token);
+            await _outputCacheStore.EvictByTagAsync("MovieCache", token);
+            return CreatedAtAction(nameof(Get), new { identity = movie.Id },
+                movie.ToMovieResponse());
+        }
+        ```
+
+### Response Cache 
+
+1. Add the folloing to `Program.cs`     
+    ```csharp
+    builder.Services.AddResponseCaching();
+    ```
+    ```csharp
+    app.UseResponseCaching(); // Must be after UseCQRS 
+    ```
+2. Update the `MovieController.cs`      
+    - Add Attribute `[ResponseCache()]` to endpoint that should use cache    
+        ```csharp
+        [HttpGet(APIEndpoints.Movies.GetAll)]
+        [AllowAnonymous]
+        [OutputCache(PolicyName = "MovieCache")]
+        [ResponseCache(Duration = 60, VaryByQueryKeys = new[] { "title", "year", "sortBy", "page", "pageSize" }, VaryByHeader = "api-version, Accept-Encoding, Accept", Location = ResponseCacheLocation.Client)]
+        [ProducesResponseType(typeof(MoviesResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetAll([FromQuery] GetAllMoviesRequest request, CancellationToken token)
+        {
+            var userId = HttpContext.GetUserId();
+            var options = request.ToGetAllMoviesOptions().WithUserId(userId);
+            var movies = await _movieService.GetAllAsync(options, token);
+            var count = await _movieService.GetCountAsync(request.Title, request.Year, token);
+
+            return Ok(movies.ToMoviesResponse(request.Page, request.PageSize, count));
+        }        
+        ```

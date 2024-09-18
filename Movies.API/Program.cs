@@ -50,6 +50,20 @@ builder.Services.AddApiVersioning(x =>
     x.ApiVersionReader = new MediaTypeApiVersionReader("api-version"); // Read the version from the Accept header, for example: Accept: application/json;api-version=1.0
 }).AddMvc().AddApiExplorer();
 
+builder.Services.AddResponseCaching();
+
+builder.Services.AddOutputCache(x =>
+{
+    x.AddBasePolicy(c => c.Cache());
+    x.AddPolicy("MovieCache", c =>
+    {
+        c.Cache()
+            .Expire(TimeSpan.FromMinutes(1))
+            .SetVaryByQuery(new string[] { "title", "year", "sortBy", "page", "pageSize" })
+            .Tag("Movie");
+    });
+});
+
 builder.Services.AddControllers();
 
 builder.Services.AddHealthChecks()
@@ -88,6 +102,10 @@ app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+//app.UseCQRS();
+app.UseResponseCaching(); // Must be after UseCQRS 
+app.UseOutputCache();     // Must be after UseCQRS
 
 app.UseMiddleware<ValidationMappingMiddleware>();
 app.MapControllers();
