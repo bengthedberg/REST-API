@@ -3154,3 +3154,127 @@ A user comes from the JWT token and a rating id done through a specific endpoint
         }
     }
     ```
+
+## Filtering
+
+Add filtering options when retriving data. In this case the get all movies can be filtered on either title and year.
+
+1. Create a new request `Request\GetAllMoviesRequest.cs` with optional parameters:
+    ```csharp
+    namespace Movies.Contracts.Requests;
+
+    public class GetAllMoviesRequest
+    {
+        public required string? Title { get; init; }
+        public required int? Year { get; init; }
+    }
+    ```
+
+2. Add a new model for passing the request into the application layer `Models\GetAllMoviesOptions.cs`
+    ```csharp
+    namespace Movies.Application.Models;
+
+    public class GetAllMoviesOptions
+    {
+        public required string? Title { get; set; }
+        public required int? Year { get; set; }
+        public Guid? UserId { get; set; }
+    }
+    ```
+
+3. Add some mapping between the request and model, not that the model will also include the current user id parameter as well. 
+   Update `Mapping\ContractMapping.cs`
+   ```csharp
+        public static GetAllMoviesOptions ToGetAllMoviesOptions(this GetAllMoviesRequest request)
+        {
+            return new GetAllMoviesOptions()
+            {
+            Title = request.Title,
+            Year = request.Year
+            };
+        }
+
+        public static GetAllMoviesOptions WithUserId(this GetAllMoviesOptions options, Guid? userId)
+        {
+            options.UserId = userId;
+            return options;
+        }
+   ```
+
+4. Update the `MovieController.cs` so the `GetAll` accept the response, transforms it to the model and pass it to the Service.
+    ```csharp
+        [HttpGet(APIEndpoints.Movies.GetAll)]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetAll([FromQuery] GetAllMoviesRequest request, CancellationToken token)
+        {
+            var userId = HttpContext.GetUserId();
+            var options = request.ToGetAllMoviesOptions().WithUserId(userId);
+            var movies = await _movieService.GetAllAsync(options, token);
+            return Ok(movies.ToMoviesResponse());
+        }
+    ```
+
+5. Add some validation on the model, which we can use in the service.
+    Create `Validators\GetAllMoviesOptionsValidator.cs`
+    ```csharp
+    using FluentValidation;
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Validators;
+
+    public class GetAllMoviesOptionsValidator : AbstractValidator<GetAllMoviesOptions>
+    {
+        public GetAllMoviesOptionsValidator()
+        {
+            RuleFor(x => x.Year)
+                .LessThanOrEqualTo(DateTime.UtcNow.Year);
+        }
+
+    }
+    ```
+
+6. Update the Movie Service :
+    Update `Services\IMoveService.cs`
+    ```csharp
+        Task<IEnumerable<Movie>> GetAllAsync(GetAllMoviesOptions options, CancellationToken token = default);
+    ```    
+    Update `Services\MoveService.cs`
+    ```csharp
+        public async Task<IEnumerable<Movie>> GetAllAsync(GetAllMoviesOptions options, CancellationToken token = default)
+        {
+            await _getAllMoviesOptionsValidator.ValidateAndThrowAsync(options, token);
+            return await _movieRepository.GetAllAsync(options, token);
+        }
+    ```
+
+7. Update the Movie Repository
+    Update `Repository\IMovieRepository.cs`
+    ```csharp
+        Task<IEnumerable<Movie>> GetAllAsync(GetAllMoviesOptions options, CancellationToken token = default);
+    ```
+    Update `RepositoryIMovieRepository.cs`
+    ```csharp
+        public async Task<IEnumerable<Movie>> GetAllAsync(GetAllMoviesOptions options, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            var result = await connection.QueryAsync(new CommandDefinition("""
+                SELECT m.*, string_agg(distinct g.name, ',') as genres, round(avg(r.rating), 1) as rating, min(ur.rating) as userrating  
+                FROM movies m 
+                LEFT JOIN genres g ON m.id = g.movieId 
+                LEFT JOIN ratings ur ON m.id = ur.movieId AND ur.userId = @UserId 
+                LEFT JOIN ratings r ON m.id = r.movieId    
+                WHERE (@Year IS NULL OR m.year = @Year) 
+                AND (@Title IS NULL OR m.title ILIKE ( '%' || @Title || '%' ))          
+                GROUP BY m.id
+                """, new { UserId = options.UserId, Year = options.Year, Title = options.Title }, cancellationToken: token));
+            return result.Select(x => new Movie()
+            {
+                Id = x.id,
+                Title = x.title,
+                Year = x.year,
+                Rating = (float?)x.rating,
+                UserRating = (int?)x.userrating,
+                Genre = Enumerable.ToList(x.genres.Split(','))
+            });
+        }
+    ```
