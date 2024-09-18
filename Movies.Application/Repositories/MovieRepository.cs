@@ -57,15 +57,21 @@ public class MovieRepository : IMovieRepository
     public async Task<IEnumerable<Movie>> GetAllAsync(GetAllMoviesOptions options, CancellationToken token = default)
     {
         using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
-        var result = await connection.QueryAsync(new CommandDefinition("""
+
+        // Sort statement is safe as long as the SortField is validated by the application in GetAllMoviesOptionsValidator
+        var sortOrder = options.SortOrder == SortOrder.Ascending ? "asc" : "desc";
+        var sortStatement = options.SortField is not null ? $"ORDER BY m.{options.SortField} {sortOrder}" : string.Empty;
+
+        var result = await connection.QueryAsync(new CommandDefinition($"""
             SELECT m.*, string_agg(distinct g.name, ',') as genres, round(avg(r.rating), 1) as rating, min(ur.rating) as userrating  
             FROM movies m 
              LEFT JOIN genres g ON m.id = g.movieId 
              LEFT JOIN ratings ur ON m.id = ur.movieId AND ur.userId = @UserId 
              LEFT JOIN ratings r ON m.id = r.movieId    
             WHERE (@Year IS NULL OR m.year = @Year) 
-              AND (@Title IS NULL OR m.title ILIKE ( '%' || @Title || '%' ))          
-            GROUP BY m.id
+              AND (@Title IS NULL OR m.title ILIKE ( '%' || @Title || '%' ))                       
+            GROUP BY m.id 
+            {sortStatement} 
             """, new { UserId = options.UserId, Year = options.Year, Title = options.Title }, cancellationToken: token));
         return result.Select(x => new Movie()
         {

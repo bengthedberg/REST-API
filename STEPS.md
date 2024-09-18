@@ -1808,7 +1808,7 @@ The `Identity.API` will dummy up a local identity server which will generate a v
 
 #### Add Authentication using JWT
 
-1. Add required nuget packages to `API` project:
+1. Add required nuget packages to `API` project:     
     `dotnet add .\Movies.API\Movies.API.csproj package Microsoft.AspNetCore.Authentication.JwtBearer`
 
 2. Update the `Program.cs` file to configure and use authentication:
@@ -1980,7 +1980,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
 
     We also need a different endpoint to get all ratings for a user.
 
-2. Modify the response to return ratings for the user as well as average rating. These are optional. 
+2. Modify the response to return ratings for the user as well as average rating. These are optional.      
     `Responses\MovieResponse.cs`
     ```csharp
         namespace Movies.Contracts.Responses;
@@ -2034,7 +2034,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
         public const string UserIdClaimName = "userid";
     ```
 
-5. Extend the `MovieController` to get current user and pass it to the service and repository :
+5. Extend the `MovieController` to get current user and pass it to the service and repository    
     `IMovieService.cs` 
     ```csharp
     using Movies.Application.Models;
@@ -2131,9 +2131,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
             return NoContent();
         }
     }
-    
     ```
-
     `IMovieRepository.cs`
     ```csharp
     using Movies.Application.Models;
@@ -2151,8 +2149,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
     Task<bool> ExistByIdAsync(Guid id, CancellationToken token = default);
     }
     ```
-
-    `MovieService.cs`
+    `MovieService.cs`    
     ```csharp
     using FluentValidation;
     using Movies.Application.Models;
@@ -2210,10 +2207,8 @@ A user comes from the JWT token and a rating id done through a specific endpoint
             return null;
         }
     }
-
     ```
-
-    `MovieRepository.cs`
+    `MovieRepository.cs`    
     ```csharp
     using Dapper;
     using Movies.Application.Database;
@@ -2355,7 +2350,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
     }
     ```
 
-6. Extend the domain model `Movie.cs`:
+6. Extend the domain model `Movie.cs`    
    ```csharp
     namespace Movies.Application.Models;
 
@@ -2378,7 +2373,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
     }
 
    ```
-7. Add a Rating Repository :
+7. Add a Rating Repository     
     `Repository\IRatingRepository.cs`
     ```csharp
     namespace Movies.Application.Repositories;
@@ -2441,7 +2436,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
         }
     ```    
 
-9. Add rating functionality to repository `MovieRepository.cs`:
+9. Add rating functionality to repository `MovieRepository.cs`
    ```csharp
     using Dapper;
     using Movies.Application.Database;
@@ -2670,7 +2665,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
 
 ## Implement User Ratings
 
-1. Extend the Ratiing Repository.
+1. Extend the Ratiing Repository.    
     `Repository\IRatingRepository.cs`
     ```csharp
     namespace Movies.Application.Repositories;
@@ -2741,7 +2736,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
     }
     ```
 
-2. Add Rating Service
+2. Add Rating Service     
     `Services\IRatingService.cs`
     ```csharp
     namespace Movies.Application.Services;
@@ -2892,7 +2887,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
 
 ## Return All Ratings for a User
 
-1. Start by adding anew model
+1. Start by adding anew model     
     `Models\MovieRating.cs`
     ```csharp
     using System;
@@ -2907,7 +2902,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
     }
     ```
    
-2. Add some new Contracts
+2. Add some new Contracts     
     `Responses\MovieRatingResponse.cs`
     ```csharp
     namespace Movies.Contracts.Responses;
@@ -2929,7 +2924,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
     }
     ```
 
-3. Update the Rating Repository
+3. Update the Rating Repository     
     `Repository\IRatingRepository.cs`
     ```csharp
     using Movies.Application.Models;
@@ -3020,7 +3015,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
     }
     ```
 
-4. Udpaet the Repository Service
+4. Udpaet the Repository Service      
     `Services\IRatingServices.cs`
     ```csharp
     using Movies.Application.Models;
@@ -3157,7 +3152,7 @@ A user comes from the JWT token and a rating id done through a specific endpoint
 
 ## Filtering
 
-Add filtering options when retriving data. In this case the get all movies can be filtered on either title and year.
+Add filtering options when retriving data. In this case the get all movies can be filtered on either title and year.     
 
 1. Create a new request `Request\GetAllMoviesRequest.cs` with optional parameters:
     ```csharp
@@ -3170,7 +3165,7 @@ Add filtering options when retriving data. In this case the get all movies can b
     }
     ```
 
-2. Add a new model for passing the request into the application layer `Models\GetAllMoviesOptions.cs`
+2. Add a new model for passing the request into the application layer `Models\GetAllMoviesOptions.cs`     
     ```csharp
     namespace Movies.Application.Models;
 
@@ -3182,7 +3177,7 @@ Add filtering options when retriving data. In this case the get all movies can b
     }
     ```
 
-3. Add some mapping between the request and model, not that the model will also include the current user id parameter as well. 
+3. Add some mapping between the request and model, not that the model will also include the current user id parameter as well.      
    Update `Mapping\ContractMapping.cs`
    ```csharp
         public static GetAllMoviesOptions ToGetAllMoviesOptions(this GetAllMoviesRequest request)
@@ -3201,7 +3196,7 @@ Add filtering options when retriving data. In this case the get all movies can b
         }
    ```
 
-4. Update the `MovieController.cs` so the `GetAll` accept the response, transforms it to the model and pass it to the Service.
+4. Update the `MovieController.cs` so the `GetAll` accept the response, transforms it to the model and pass it to the Service.     
     ```csharp
         [HttpGet(APIEndpoints.Movies.GetAll)]
         [AllowAnonymous]
@@ -3214,7 +3209,7 @@ Add filtering options when retriving data. In this case the get all movies can b
         }
     ```
 
-5. Add some validation on the model, which we can use in the service.
+5. Add some validation on the model, which we can use in the service.       
     Create `Validators\GetAllMoviesOptionsValidator.cs`
     ```csharp
     using FluentValidation;
@@ -3233,7 +3228,7 @@ Add filtering options when retriving data. In this case the get all movies can b
     }
     ```
 
-6. Update the Movie Service :
+6. Update the Movie Service     
     Update `Services\IMoveService.cs`
     ```csharp
         Task<IEnumerable<Movie>> GetAllAsync(GetAllMoviesOptions options, CancellationToken token = default);
@@ -3278,3 +3273,116 @@ Add filtering options when retriving data. In this case the get all movies can b
             });
         }
     ```
+
+## Sort
+
+Sorting the result by fields. Avoid slow performance by only sorting on fields that are backed by database index or keys.
+
+1. Update the request `GetAllMoviesRequest.cs`
+    ```csharp
+    namespace Movies.Contracts.Requests;
+
+    public class GetAllMoviesRequest
+    {
+        public required string? Title { get; init; }
+        public required int? Year { get; init; }
+        public required string? SortBy { get; init; }
+    }
+    ```
+
+2. Update the model `GetAllMoviesOptions.cs`
+    ```csharp
+    namespace Movies.Application.Models;
+
+    public class GetAllMoviesOptions
+    {
+        public required string? Title { get; set; }
+        public required int? Year { get; set; }
+        public Guid? UserId { get; set; }
+
+        public string? SortField { get; set; }
+        public SortOrder? SortOrder { get; set; }
+    }
+
+    public enum SortOrder
+    {
+        Unsorted,
+        Ascending,
+        Descending
+    }
+    ```
+
+3. Add the logic to the contract mapping `ContractMapping.cs`
+    ```csharp
+        public static GetAllMoviesOptions ToGetAllMoviesOptions(this GetAllMoviesRequest request)
+        {
+            return new GetAllMoviesOptions()
+            {
+            Title = request.Title,
+            Year = request.Year,
+            SortField = request.SortBy?.Trim('+', '-'),
+            SortOrder = request.SortBy is null ? SortOrder.Unsorted :
+                request.SortBy?.StartsWith('-') == true ? SortOrder.Descending : SortOrder.Ascending
+            };
+        }
+    ```
+
+4. Add the sorting to the repository `MovieRepository.cs`
+    ```csharp
+        public async Task<IEnumerable<Movie>> GetAllAsync(GetAllMoviesOptions options, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+
+            // Sort statement is safe as long as the SortField is validated by the application in GetAllMoviesOptionsValidator
+            var sortOrder = options.SortOrder == SortOrder.Ascending ? "asc" : "desc";
+            var sortStatement = options.SortField is not null ? $"ORDER BY m.{options.SortField} {sortOrder}" : string.Empty;
+
+            var result = await connection.QueryAsync(new CommandDefinition($"""
+                SELECT m.*, string_agg(distinct g.name, ',') as genres, round(avg(r.rating), 1) as rating, min(ur.rating) as userrating  
+                FROM movies m 
+                LEFT JOIN genres g ON m.id = g.movieId 
+                LEFT JOIN ratings ur ON m.id = ur.movieId AND ur.userId = @UserId 
+                LEFT JOIN ratings r ON m.id = r.movieId    
+                WHERE (@Year IS NULL OR m.year = @Year) 
+                AND (@Title IS NULL OR m.title ILIKE ( '%' || @Title || '%' ))                       
+                GROUP BY m.id 
+                {sortStatement} 
+                """, new { UserId = options.UserId, Year = options.Year, Title = options.Title }, cancellationToken: token));
+            return result.Select(x => new Movie()
+            {
+                Id = x.id,
+                Title = x.title,
+                Year = x.year,
+                Rating = (float?)x.rating,
+                UserRating = (int?)x.userrating,
+                Genre = Enumerable.ToList(x.genres.Split(','))
+            });
+        }
+    ```
+
+5. Validation is required of the sort fields as the sort statement is just added to the SQL statement. This will prevent any sql injection attempts.     
+    `Validators\GetAllMoviesOptionsValidatorcs`
+    ```csharp
+    using FluentValidation;
+    using Movies.Application.Models;
+
+    namespace Movies.Application.Validators;
+
+    public class GetAllMoviesOptionsValidator : AbstractValidator<GetAllMoviesOptions>
+    {
+        private static readonly string[] AllowedSortFields = { "title", "year" };
+
+        public GetAllMoviesOptionsValidator()
+        {
+            RuleFor(x => x.Year)
+                .LessThanOrEqualTo(DateTime.UtcNow.Year);
+
+            RuleFor(x => x.SortField)
+                .Must(x => AllowedSortFields.Contains(x.ToLowerInvariant()))
+                .When(x => x.SortField != null)
+                .WithMessage($"Invalid sort field. Allowed values are: {string.Join(", ", AllowedSortFields)}");
+        }
+
+    }
+    ```
+
