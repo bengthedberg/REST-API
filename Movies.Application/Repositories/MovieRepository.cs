@@ -49,7 +49,7 @@ public class MovieRepository : IMovieRepository
     {
         using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
         var exists = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
-            SELECT COUNT(*) FROM movies WHERE id = @Id
+            SELECT COUNT(id) FROM movies WHERE id = @Id
             """, new { Id = id }, cancellationToken: token));
         return exists;
     }
@@ -72,7 +72,9 @@ public class MovieRepository : IMovieRepository
               AND (@Title IS NULL OR m.title ILIKE ( '%' || @Title || '%' ))                       
             GROUP BY m.id 
             {sortStatement} 
-            """, new { UserId = options.UserId, Year = options.Year, Title = options.Title }, cancellationToken: token));
+            limit @PageSize
+            offset @PageOffset
+            """, new { UserId = options.UserId, Year = options.Year, Title = options.Title, PageSize = options.PageSize, PageOffset = (options.Page - 1) * options.PageSize }, cancellationToken: token));
         return result.Select(x => new Movie()
         {
             Id = x.id,
@@ -133,6 +135,16 @@ public class MovieRepository : IMovieRepository
         }
 
         return movie;
+    }
+
+    public async Task<int> GetCountAsync(string? title, int? year, CancellationToken token = default)
+    {
+        using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+        return await connection.QuerySingleOrDefaultAsync<int>(new CommandDefinition($"""
+            SELECT count(id) 
+              FROM movies 
+            WHERE (@Year IS NULL OR year = @Year) AND (@Title IS NULL OR title ILIKE ( '%' || @Title || '%' ))
+            """, new { Year = year, Title = title }, cancellationToken: token));
     }
 
     public async Task<bool> UpdateAsync(Movie movie, Guid? userId = default, CancellationToken token = default)

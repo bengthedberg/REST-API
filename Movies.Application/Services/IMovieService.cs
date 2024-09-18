@@ -10,4 +10,5 @@ public interface IMovieService
     Task<bool> CreateAsync(Movie movie, CancellationToken token = default); // true if movie was created successfully
     Task<Movie?> UpdateAsync(Movie movie, Guid? userId = default, CancellationToken token = default); // true if movie was updated successfully
     Task<bool> DeleteAsync(Guid id, CancellationToken token = default); // true if movie was deleted successfully
+    Task<int> GetCountAsync(string? title, int? year, CancellationToken token = default);
 }

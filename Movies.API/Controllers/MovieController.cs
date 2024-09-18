@@ -48,7 +48,9 @@ public class MovieController : ControllerBase
         var userId = HttpContext.GetUserId();
         var options = request.ToGetAllMoviesOptions().WithUserId(userId);
         var movies = await _movieService.GetAllAsync(options, token);
-        return Ok(movies.ToMoviesResponse());
+        var count = await _movieService.GetCountAsync(request.Title, request.Year, token);
+
+        return Ok(movies.ToMoviesResponse(request.Page, request.PageSize, count));
     }
 
     [HttpPut(APIEndpoints.Movies.Update)]

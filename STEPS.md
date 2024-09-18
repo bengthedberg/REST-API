@@ -3386,3 +3386,185 @@ Sorting the result by fields. Avoid slow performance by only sorting on fields t
     }
     ```
 
+## Pagination
+
+Currently the GetAllMovies will return all data in the database. Returning thousands of records will slow down the client so we need to add pagination.
+
+1. Update the request.      
+    - Add  new `PageRequest.cs` that can be used for all pagination requests. 
+        ```csharp
+        namespace Movies.Contracts.Requests;
+
+        public class PageRequest
+        {
+            public required int Page { get; init; } = 1;
+            public required int PageSize { get; init; } = 10;
+        }
+        ```
+    - Update the `GetAllMoviesRequest` to extend this new `PageRequest`    
+        ```csharp
+        namespace Movies.Contracts.Requests;
+
+        public class GetAllMoviesRequest : PageRequest
+        {
+            public required string? Title { get; init; }
+            public required int? Year { get; init; }
+            public required string? SortBy { get; init; }
+        }
+        ```    
+
+2. Update the model `GetAllMoviesOptions.cs` to hold the paging data :
+    ```csharp
+    namespace Movies.Application.Models;
+
+    public class GetAllMoviesOptions
+    {
+        public required string? Title { get; set; }
+        public required int? Year { get; set; }
+        public Guid? UserId { get; set; }
+
+        public string? SortField { get; set; }
+        public SortOrder? SortOrder { get; set; }
+
+        public int Page { get; set; }
+        public int PageSize { get; set; }
+    }
+
+    public enum SortOrder
+    {
+        Unsorted,
+        Ascending,
+        Descending
+    }
+    ```
+
+3. The response also need to return page information as well.
+    - Add a new `PageResponse` that is generic and can be reused for any paginated response.
+      ```csharp
+        namespace Movies.Contracts.Responses;
+
+        public class PageResponse<T>
+        {
+            public required IEnumerable<T> Items { get; init; } = Enumerable.Empty<T>();
+            public required int Page { get; init; }
+            public required int PageSize { get; init; }
+            public required int TotalCount { get; init; }
+            public bool HasNextPage => TotalCount > (Page * PageSize);
+        }
+      ```
+    - Modify the `MoviesReponse.cs` to use this new class :
+      ```csharp
+        namespace Movies.Contracts.Responses;
+
+        public class MoviesResponse : PageResponse<MovieResponse>
+        {
+        }
+      ```      
+
+4. Add the logic to the contract mapping `ContractMapping.cs`
+    ```csharp
+            public static MoviesResponse ToMoviesResponse(this IEnumerable<Movie> movies, int page, int pageSize, int count)
+            {
+                return new MoviesResponse()
+                {
+                Items = movies.Select(ToMovieResponse),
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = count
+                };
+            }
+    ```
+    ```csharp
+            public static GetAllMoviesOptions ToGetAllMoviesOptions(this GetAllMoviesRequest request)
+            {
+                return new GetAllMoviesOptions()
+                {
+                Title = request.Title,
+                Year = request.Year,
+                SortField = request.SortBy?.Trim('+', '-'),
+                SortOrder = request.SortBy is null ? SortOrder.Unsorted :
+                    request.SortBy?.StartsWith('-') == true ? SortOrder.Descending : SortOrder.Ascending,
+                Page = request.Page,
+                PageSize = request.PageSize
+                };
+            }
+    ```
+
+5. The paging response requires the total pages so we need to implement a GetCount method in our Repository and Service: 
+    - Update `IMovieRepository`
+    ```csharp
+        Task<int> GetCountAsync(string? title, int? year, CancellationToken token = default);
+    ```
+    - Implement it in `MovieRepository`
+    ```csharp
+        public async Task<int> GetCountAsync(string? title, int? year, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+            return await connection.QuerySingleOrDefaultAsync<int>(new CommandDefinition($"""
+                SELECT count(id) 
+                FROM movies 
+                WHERE (@Year IS NULL OR year = @Year) AND (@Title IS NULL OR title ILIKE ( '%' || @Title || '%' ))
+                """, new { Year = year, Title = title }, cancellationToken: token));
+        }
+    ```
+    - Also implement the paging and offset in the `Movierepository`
+    ```csharp
+        public async Task<IEnumerable<Movie>> GetAllAsync(GetAllMoviesOptions options, CancellationToken token = default)
+        {
+            using var connection = await _connectionFactoryConnection.CreateConnectionAsync(token);
+
+            // Sort statement is safe as long as the SortField is validated by the application in GetAllMoviesOptionsValidator
+            var sortOrder = options.SortOrder == SortOrder.Ascending ? "asc" : "desc";
+            var sortStatement = options.SortField is not null ? $"ORDER BY m.{options.SortField} {sortOrder}" : string.Empty;
+
+            var result = await connection.QueryAsync(new CommandDefinition($"""
+                SELECT m.*, string_agg(distinct g.name, ',') as genres, round(avg(r.rating), 1) as rating, min(ur.rating) as userrating  
+                FROM movies m 
+                LEFT JOIN genres g ON m.id = g.movieId 
+                LEFT JOIN ratings ur ON m.id = ur.movieId AND ur.userId = @UserId 
+                LEFT JOIN ratings r ON m.id = r.movieId    
+                WHERE (@Year IS NULL OR m.year = @Year) 
+                AND (@Title IS NULL OR m.title ILIKE ( '%' || @Title || '%' ))                       
+                GROUP BY m.id 
+                {sortStatement} 
+                limit @PageSize
+                offset @PageOffset
+                """, new { UserId = options.UserId, Year = options.Year, Title = options.Title, PageSize = options.PageSize, PageOffset = (options.Page - 1) * options.PageSize }, cancellationToken: token));
+            return result.Select(x => new Movie()
+            {
+                Id = x.id,
+                Title = x.title,
+                Year = x.year,
+                Rating = (float?)x.rating,
+                UserRating = (int?)x.userrating,
+                Genre = Enumerable.ToList(x.genres.Split(','))
+            });
+        }
+    ```
+    - Extend the `IMovieService` 
+    ```csharp
+        Task<int> GetCountAsync(string? title, int? year, CancellationToken token = default);
+    ```
+    - Implemnent it in `MovieService` 
+    ```csharp
+        public async Task<int> GetCountAsync(string? title, int? year, CancellationToken token = default)
+        {
+            return await _movieRepository.GetCountAsync(title, year, token);
+        }
+    ```
+6. Tie it all together in the `MovieController`
+    ```csharp
+    [HttpGet(APIEndpoints.Movies.GetAll)]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetAll([FromQuery] GetAllMoviesRequest request, CancellationToken token)
+    {
+        var userId = HttpContext.GetUserId();
+        var options = request.ToGetAllMoviesOptions().WithUserId(userId);
+        var movies = await _movieService.GetAllAsync(options, token);
+        var count = await _movieService.GetCountAsync(request.Title, request.Year, token);
+
+        return Ok(movies.ToMoviesResponse(request.Page, request.PageSize, count));
+    }
+    ```
+
+

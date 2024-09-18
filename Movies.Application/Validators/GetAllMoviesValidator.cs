@@ -1,3 +1,4 @@
+using System.Data;
 using FluentValidation;
 using Movies.Application.Models;
 
@@ -16,6 +17,13 @@ public class GetAllMoviesOptionsValidator : AbstractValidator<GetAllMoviesOption
             .Must(x => AllowedSortFields.Contains(x.ToLowerInvariant()))
             .When(x => x.SortField != null)
             .WithMessage($"Invalid sort field. Allowed values are: {string.Join(", ", AllowedSortFields)}");
+
+        RuleFor(x => x.PageSize)
+            .InclusiveBetween(1, 25);
+
+        RuleFor(x => x.Page)
+            .GreaterThanOrEqualTo(1);
+
     }
 
 }
