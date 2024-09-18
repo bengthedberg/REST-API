@@ -3857,3 +3857,55 @@ Currently the GetAllMovies will return all data in the database. Returning thous
         }
    ```
 
+## Add Healthcheck
+
+An API has an health check endpoint that returns the health of the service. The endpoint handler performs various checks, such as. the status of any external API it depends on, databases etc.
+
+1. Add `builder.Services.AddHealthChecks();` and `app.MapHealthChecks("_health");` to the `Programs.cs`      
+    > Using a '_' prefix lets us know that the endpoint is not part of the actual API, rather a metadata endpoint.       
+    
+
+2. Implement different health logics by extending `IHealthCheck`, for example a database check `Health\DatabaseHealthCheck.cs`     
+    ```csharp
+    using Microsoft.Extensions.Diagnostics.HealthChecks;
+    using Movies.Application.Database;
+
+    namespace Movies.API.Health;
+
+    public class DatabaseHealthCheck : IHealthCheck
+    {
+        public static string Name => "Database";
+        private readonly IDatabaseConnectionFactory _databaseConnectionFactory;
+        private readonly ILogger<DatabaseHealthCheck> _logger;
+
+        public DatabaseHealthCheck(IDatabaseConnectionFactory databaseConnectionFactory, ILogger<DatabaseHealthCheck> logger)
+        {
+            _databaseConnectionFactory = databaseConnectionFactory;
+            _logger = logger;
+        }
+
+        public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+        {
+            // Check the database connection
+            // If the connection is successful, return HealthCheckResult.Healthy
+            // If the connection is not successful, return HealthCheckResult.Unhealthy
+            // If the connection is slow, return HealthCheckResult.Degraded
+            try
+            {
+                _ = await _databaseConnectionFactory.CreateConnectionAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Database health check failed", ex);
+                return HealthCheckResult.Unhealthy(ex.Message);
+            }
+
+            return HealthCheckResult.Healthy();
+        }
+    }
+    ```
+3. Use the specific healtcheck by adding the following to `Program.cs`
+    ```csharp
+    builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>(DatabaseHealthCheck.Name);
+    ```
