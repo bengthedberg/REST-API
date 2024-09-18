@@ -3839,3 +3839,21 @@ Currently the GetAllMovies will return all data in the database. Returning thous
             }
         });
    ```   
+
+### Add more information to Swagger document
+
+1. Add Attributes `[ProducesResponseType()]` to controller, for example the `Create` endpoint :     
+   ```csharp
+        [HttpPost(APIEndpoints.Movies.Create)]
+        [Authorize(APIAuthorizationConstants.TrustedUserPolicyName)]
+        [ProducesResponseType(typeof(MovieResponse), StatusCodes.Status201Created)]
+        [ProducesResponseType(typeof(ValidationFailureResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> Create([FromBody] CreateMovieRequest request, CancellationToken token)
+        {
+            var movie = request.ToMovie();
+            await _movieService.CreateAsync(movie, token);
+            return CreatedAtAction(nameof(Get), new { identity = movie.Id },
+                movie.ToMovieResponse());
+        }
+   ```
+
