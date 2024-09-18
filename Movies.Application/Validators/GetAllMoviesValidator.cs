@@ -14,7 +14,7 @@ public class GetAllMoviesOptionsValidator : AbstractValidator<GetAllMoviesOption
             .LessThanOrEqualTo(DateTime.UtcNow.Year);
 
         RuleFor(x => x.SortField)
-            .Must(x => AllowedSortFields.Contains(x.ToLowerInvariant()))
+            .Must(x => AllowedSortFields.Contains(x!.ToLowerInvariant()))
             .When(x => x.SortField != null)
             .WithMessage($"Invalid sort field. Allowed values are: {string.Join(", ", AllowedSortFields)}");
 

@@ -1,10 +1,13 @@
 using System.Text;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Movies.API.Auth;
 using Movies.API.Mapping;
+using Movies.API.Swagger;
 using Movies.Application.Database;
+using Swashbuckle.AspNetCore.SwaggerGen;
 
 var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
@@ -44,12 +47,11 @@ builder.Services.AddApiVersioning(x =>
     x.AssumeDefaultVersionWhenUnspecified = true; // Assume the default version when the client does not specify a version
     x.ReportApiVersions = true;                   // Add headers to the response that indicate the supported versions, for example: api-supported-versions: 1.0, 2.0 api-deprecated-versions: 3.0
     x.ApiVersionReader = new MediaTypeApiVersionReader("api-version"); // Read the version from the Accept header, for example: Accept: application/json;api-version=1.0
-}).AddMvc();
+}).AddMvc().AddApiExplorer();
 
 builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddTransient<IConfigureOptions<SwaggerGenOptions>, ConfigureSwaggerOptions>();
+builder.Services.AddSwaggerGen(x => x.OperationFilter<SwaggerDefaultValues>());
 
 builder.Services.AddApplication();
 builder.Services.AddDatabases(config["Database:ConnectionString"]!);
@@ -60,7 +62,19 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(
+       options =>
+       {
+           var descriptions = app.DescribeApiVersions();
+
+           // build a swagger endpoint for each discovered API version
+           foreach (var description in descriptions)
+           {
+               var url = $"/swagger/{description.GroupName}/swagger.json";
+               var name = description.GroupName.ToUpperInvariant();
+               options.SwaggerEndpoint(url, name);
+           }
+       });
 }
 
 app.UseHttpsRedirection();

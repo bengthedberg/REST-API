@@ -3597,3 +3597,216 @@ Currently the GetAllMovies will return all data in the database. Returning thous
     public class RatingController : ControllerBase
     {
     ```
+
+## Swagger
+
+### Versioning
+
+1. Add the following Nuget package to the `API`     
+    `dotnet add ./Movies.API/Movies.API.csproj package Asp.Versioning.Mvc.ApiExplorer`
+
+2. Add a new folder `Swagger with 2 new files :       
+    - `ConfigureSwaggerOptions.cs`
+      ```csharp
+        using System.Text;
+        using Asp.Versioning.ApiExplorer;
+        using Microsoft.Extensions.Options;
+        using Microsoft.Extensions.Primitives;
+        using Microsoft.OpenApi.Models;
+        using Swashbuckle.AspNetCore.SwaggerGen;
+
+        namespace Movies.API.Swagger;
+
+        public class ConfigureSwaggerOptions : IConfigureOptions<SwaggerGenOptions>
+        {
+            private readonly IApiVersionDescriptionProvider _provider;
+            private readonly IHostEnvironment _environment;
+
+            public ConfigureSwaggerOptions(IApiVersionDescriptionProvider provider, IHostEnvironment environment)
+            {
+                _provider = provider;
+                _environment = environment;
+            }
+
+            public void Configure(SwaggerGenOptions options)
+            {
+                // add a swagger document for each discovered API version
+                // note: you might choose to skip or document deprecated API versions differently
+                foreach (var description in _provider.ApiVersionDescriptions)
+                {
+                    options.SwaggerDoc(description.GroupName, CreateInfoForApiVersion(description, _environment));
+                }
+
+            }
+
+            private static OpenApiInfo CreateInfoForApiVersion(ApiVersionDescription description, IHostEnvironment _environment)
+            {
+                var text = new StringBuilder("A description of this API");
+                var info = new OpenApiInfo()
+                {
+                    Title = $"{_environment.ApplicationName} ({_environment.EnvironmentName})",
+                    Version = description.ApiVersion.ToString(),
+                    Contact = new OpenApiContact() { Name = "John Doe", Email = "john.doe@somewhere.com" },
+                    License = new OpenApiLicense() { Name = "MIT", Url = new Uri("https://opensource.org/licenses/MIT") }
+                };
+
+                if (description.IsDeprecated)
+                {
+                    text.Append(" This API version has been deprecated.");
+                }
+
+                if (description.SunsetPolicy is { } policy)
+                {
+                    if (policy.Date is { } when)
+                    {
+                        text.Append(" The API will be sunset on ")
+                            .Append(when.Date.ToShortDateString())
+                            .Append('.');
+                    }
+
+                    if (policy.HasLinks)
+                    {
+                        text.AppendLine();
+
+                        var rendered = false;
+
+                        for (var i = 0; i < policy.Links.Count; i++)
+                        {
+                            var link = policy.Links[i];
+
+                            if (link.Type == "text/html")
+                            {
+                                if (!rendered)
+                                {
+                                    text.Append("<h4>Links</h4><ul>");
+                                    rendered = true;
+                                }
+
+                                text.Append("<li><a href=\"");
+                                text.Append(link.LinkTarget.OriginalString);
+                                text.Append("\">");
+                                text.Append(
+                                    StringSegment.IsNullOrEmpty(link.Title)
+                                    ? link.LinkTarget.OriginalString
+                                    : link.Title.ToString());
+                                text.Append("</a></li>");
+                            }
+                        }
+
+                        if (rendered)
+                        {
+                            text.Append("</ul>");
+                        }
+                    }
+                }
+
+                text.Append("<h4>Additional Information</h4>");
+                info.Description = text.ToString();
+
+                return info;
+            }
+        }      
+      ```
+    - `SwaggerDefaultValues.cs`
+      ```csharp
+        using Microsoft.AspNetCore.Mvc.ApiExplorer;
+        using Microsoft.AspNetCore.Mvc.ModelBinding;
+        using Microsoft.OpenApi.Models;
+        using Swashbuckle.AspNetCore.SwaggerGen;
+        using System.Text.Json;
+
+        namespace Movies.API.Swagger;
+
+        public class SwaggerDefaultValues : IOperationFilter
+        {
+            /// <inheritdoc />
+            public void Apply(OpenApiOperation operation, OperationFilterContext context)
+            {
+                var apiDescription = context.ApiDescription;
+
+                operation.Deprecated |= apiDescription.IsDeprecated();
+
+                // REF: https://github.com/domaindrivendev/Swashbuckle.AspNetCore/issues/1752#issue-663991077
+                foreach (var responseType in context.ApiDescription.SupportedResponseTypes)
+                {
+                    // REF: https://github.com/domaindrivendev/Swashbuckle.AspNetCore/blob/b7cf75e7905050305b115dd96640ddd6e74c7ac9/src/Swashbuckle.AspNetCore.SwaggerGen/SwaggerGenerator/SwaggerGenerator.cs#L383-L387
+                    var responseKey = responseType.IsDefaultResponse ? "default" : responseType.StatusCode.ToString();
+                    var response = operation.Responses[responseKey];
+
+                    foreach (var contentType in response.Content.Keys)
+                    {
+                        if (!responseType.ApiResponseFormats.Any(x => x.MediaType == contentType))
+                        {
+                            response.Content.Remove(contentType);
+                        }
+                    }
+                }
+
+                if (operation.Parameters == null)
+                {
+                    return;
+                }
+
+                // REF: https://github.com/domaindrivendev/Swashbuckle.AspNetCore/issues/412
+                // REF: https://github.com/domaindrivendev/Swashbuckle.AspNetCore/pull/413
+                foreach (var parameter in operation.Parameters)
+                {
+                    var description = apiDescription.ParameterDescriptions.First(p => p.Name == parameter.Name);
+
+                    parameter.Description ??= description.ModelMetadata?.Description;
+
+                    if (parameter.Schema.Default == null &&
+                        description.DefaultValue != null &&
+                        description.DefaultValue is not DBNull &&
+                        description.ModelMetadata is ModelMetadata modelMetadata)
+                    {
+                        // REF: https://github.com/Microsoft/aspnet-api-versioning/issues/429#issuecomment-605402330
+                        var json = JsonSerializer.Serialize(description.DefaultValue, modelMetadata.ModelType);
+                        parameter.Schema.Default = OpenApiAnyFactory.CreateFromJson(json);
+                    }
+
+                    parameter.Required |= description.IsRequired;
+                }
+            }
+        }      
+      ```          
+3. Modify the `Program.cs` as follows :     
+   ```csharp
+        builder.Services.AddApiVersioning(x =>
+        {
+            x.DefaultApiVersion = new ApiVersion(1, 0);   // Set the default version to 1.0
+            x.AssumeDefaultVersionWhenUnspecified = true; // Assume the default version when the client does not specify a version
+            x.ReportApiVersions = true;                   // Add headers to the response that indicate the supported versions, for example: api-supported-versions: 1.0, 2.0 api-deprecated-versions: 3.0
+            x.ApiVersionReader = new MediaTypeApiVersionReader("api-version"); // Read the version from the Accept header, for example: Accept: application/json;api-version=1.0
+        }).AddMvc().AddApiExplorer();
+
+        builder.Services.AddControllers();
+        builder.Services.AddTransient<IConfigureOptions<SwaggerGenOptions>, ConfigureSwaggerOptions>();
+        builder.Services.AddSwaggerGen(x => x.OperationFilter<SwaggerDefaultValues>());
+
+        builder.Services.AddApplication();
+        builder.Services.AddDatabases(config["Database:ConnectionString"]!);
+
+        var app = builder.Build();
+
+        // Configure the HTTP request pipeline.
+        if (app.Environment.IsDevelopment())
+        {
+            app.UseSwagger();
+            app.UseSwaggerUI(
+            options =>
+            {
+                var descriptions = app.DescribeApiVersions();
+
+                // build a swagger endpoint for each discovered API version
+                foreach (var description in descriptions)
+                {
+                    var url = $"/swagger/{description.GroupName}/swagger.json";
+                    var name = description.GroupName.ToUpperInvariant();
+                    options.SwaggerEndpoint(url, name);
+                }
+            });
+        }   
+   ```   
+   
+      
