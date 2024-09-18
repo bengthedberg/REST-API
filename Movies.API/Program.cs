@@ -1,4 +1,5 @@
 using System.Text;
+using Asp.Versioning;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Movies.API.Auth;
@@ -36,6 +37,14 @@ builder.Services.AddAuthorization(x =>
         ctx.User.HasClaim(APIAuthorizationConstants.AdminUserClaimName, "true")
     ));
 });
+
+builder.Services.AddApiVersioning(x =>
+{
+    x.DefaultApiVersion = new ApiVersion(1, 0);   // Set the default version to 1.0
+    x.AssumeDefaultVersionWhenUnspecified = true; // Assume the default version when the client does not specify a version
+    x.ReportApiVersions = true;                   // Add headers to the response that indicate the supported versions, for example: api-supported-versions: 1.0, 2.0 api-deprecated-versions: 3.0
+    x.ApiVersionReader = new MediaTypeApiVersionReader("api-version"); // Read the version from the Accept header, for example: Accept: application/json;api-version=1.0
+}).AddMvc();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle

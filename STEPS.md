@@ -3567,4 +3567,33 @@ Currently the GetAllMovies will return all data in the database. Returning thous
     }
     ```
 
+## Versioning
 
+1. Add the following Nuget package to the `API`     
+    `dotnet add ./Movies.API/Movies.API.csproj package Asp.Versioning.Mvc`
+
+2. Add the following to `Program`       
+   ```csharp
+        builder.Services.AddApiVersioning(x =>
+        {
+            x.DefaultApiVersion = new ApiVersion(1, 0);   // Set the default version to 1.0
+            x.AssumeDefaultVersionWhenUnspecified = true; // Assume the default version when the client does not specify a version
+            x.ReportApiVersions = true;                   // Add headers to the response that indicate the supported versions, for example: api-supported-versions: 1.0, 2.0 api-deprecated-versions: 3.0
+            x.ApiVersionReader = new MediaTypeApiVersionReader("api-version"); // Read the version from the Accept header, for example: Accept: application/json;api-version=1.0
+        }).AddMvc();   
+   ```
+
+3. Add `[ApiVersion(1.0)]` attribute the controllers (or endpoint if needed)      
+    ```csharp
+    [ApiVersion(1.0)]
+    [ApiController]
+    public class MovieController : ControllerBase
+    {
+    ```
+
+    ```csharp
+    [ApiVersion(1.0)]
+    [ApiController]
+    public class RatingController : ControllerBase
+    {
+    ```
