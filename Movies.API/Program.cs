@@ -36,7 +36,9 @@ builder.Services.AddAuthentication(x =>
 
 builder.Services.AddAuthorization(x =>
 {
-    x.AddPolicy(APIAuthorizationConstants.AdminUserPolicyName, p => p.RequireClaim(APIAuthorizationConstants.AdminUserClaimName, "true"));
+    //x.AddPolicy(APIAuthorizationConstants.AdminUserPolicyName, p => p.RequireClaim(APIAuthorizationConstants.AdminUserClaimName, "true"));
+    x.AddPolicy(APIAuthorizationConstants.AdminUserPolicyName, p => p.Requirements.Add(new AdminAuthRequirement(config["Api:Key"]!, config["Api:UserId"]!)));
+    
     x.AddPolicy(APIAuthorizationConstants.TrustedUserPolicyName, p => p.RequireAssertion(ctx =>
         ctx.User.HasClaim(APIAuthorizationConstants.TrustedUserClaimName, "true") ||
         ctx.User.HasClaim(APIAuthorizationConstants.AdminUserClaimName, "true")

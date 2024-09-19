@@ -4085,6 +4085,86 @@ Normally used as a request header of `x-api-key` with the actual api key as its 
 
 This would work fine if we didn't have any other authentication, but we also implements user authentication with JWT. 
 
+## Multiple Authentication
+
+When you have multiple authentication types for an endpoint then we need to compibe these into one. 
 
 
+- Add the following to the `appsettings.json`
+    ```json
+      "Api": {
+            "Key": "1234567890abcdefghijklmnopqrstuvwxyz",
+            "UserId" : "bc4d19a7-6985-426f-a1f1-94cc984a1872"
+      },
+    ```
+- Create a new class `Auth\AdminAuthRequirement`
+    ```csharp
+    using System.Runtime.CompilerServices;
+    using System.Security.Claims;
+    using Microsoft.AspNetCore.Authorization;
+
+    namespace Movies.API.Auth;
+
+    public class AdminAuthRequirement : IAuthorizationHandler, IAuthorizationRequirement
+    {
+        private readonly string _apiKey;
+        private readonly string _apiKeyUserId;
+
+        public AdminAuthRequirement(string apiKey, string apiKeyUserId)
+        {
+            _apiKey = apiKey;
+            _apiKeyUserId = apiKeyUserId;
+        }
+
+        public Task HandleAsync(AuthorizationHandlerContext context)
+        {
+            // First check if the user is authenticated and has the admin claim
+            if (context.User.HasClaim(APIAuthorizationConstants.AdminUserClaimName, "true")) 
+            {
+                context.Succeed(this);
+                return Task.CompletedTask;
+            }
+
+            // If the user is not authenticated, check if the request has the api key
+            var httpContext = context.Resource as HttpContext;
+            if (httpContext is null)
+            {
+                return Task.CompletedTask;
+            }
+
+            if (!httpContext.Request.Headers.TryGetValue(APIAuthorizationConstants.ApiKeyHeaderName, out var requestedApiKey))
+            {
+                context.Fail();
+                return Task.CompletedTask;
+            }
+            else 
+            {
+                if (_apiKey != requestedApiKey)
+                {
+                    context.Fail();
+                    return Task.CompletedTask;
+                }
+            }
+            // Add the user id claim to the identity of the api key request
+            var identity = (ClaimsIdentity)context.User.Identity!;
+            identity.AddClaim(new Claim(APIAuthorizationConstants.UserIdClaimName, _apiKeyUserId));
+            context.Succeed(this);
+            return Task.CompletedTask;
+        }
+    }
+    ```
+- Replace policy `APIAuthorizationConstants.AdminUserPolicyName` in the `Program.cs` :
+    ```csharp
+    builder.Services.AddAuthorization(x =>
+    {
+        //x.AddPolicy(APIAuthorizationConstants.AdminUserPolicyName, p => p.RequireClaim(APIAuthorizationConstants.AdminUserClaimName, "true"));
+        x.AddPolicy(APIAuthorizationConstants.AdminUserPolicyName, p => p.Requirements.Add(new AdminAuthRequirement(config["Api:Key"]!, config["Api:UserId"]!)));
+        
+        x.AddPolicy(APIAuthorizationConstants.TrustedUserPolicyName, p => p.RequireAssertion(ctx =>
+            ctx.User.HasClaim(APIAuthorizationConstants.TrustedUserClaimName, "true") ||
+            ctx.User.HasClaim(APIAuthorizationConstants.AdminUserClaimName, "true")
+        ));
+    });
+    ```
+Now the Delete endpoint (the only one that requires AdminUser will work with both a JWT and an API Key).
 

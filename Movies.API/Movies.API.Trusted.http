@@ -62,7 +62,7 @@ Accept: application/json
 ### Delete the rating
 DELETE {{baseURL}}/api/movies/{{movieId}}/rating
 Content-Type: application/json
-Authorization: Bearer {{jwtTrustedToken}}
+#Authorization: Bearer {{jwtTrustedToken}}
 Accept: application/json
 
 ### Update a Movie using id
@@ -101,5 +101,5 @@ Accept: application/json
 ### Delete a Movie using id, will fail as trusted users can not delete movies m403 Forbidden.
 DELETE {{baseURL}}/api/movies/{{movieId}}
 Content-Type: application/json
-Authorization: Bearer {{jwtTrustedToken}}
+x-api-key: 1234567890abcdefghijklmnopqrstuvwxyz
 Accept: application/json
