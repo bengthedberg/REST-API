@@ -1,6 +1,7 @@
 using System.Text;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Movies.API.Auth;
@@ -41,6 +42,8 @@ builder.Services.AddAuthorization(x =>
         ctx.User.HasClaim(APIAuthorizationConstants.AdminUserClaimName, "true")
     ));
 });
+
+builder.Services.AddScoped<IAuthorizationFilter, ApiKeyAuthFilter>();
 
 builder.Services.AddApiVersioning(x =>
 {

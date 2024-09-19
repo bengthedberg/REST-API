@@ -4017,3 +4017,74 @@ The most significant difference is that ResponseCache is to cache on the client 
             return Ok(movies.ToMoviesResponse(request.Page, request.PageSize, count));
         }        
         ```
+
+## API Key Authentication
+
+Services communicating with one another uses API Key based authentication. 
+
+Normally used as a request header of `x-api-key` with the actual api key as its value.
+
+- Add the following to the `appsettings.json`
+    ```json
+      "Api": {
+            "Key": "1234567890abcdefghijklmnopqrstuvwxyz"
+      },
+    ```
+
+- Add a new constant for the header key in `APIAuthorizationConstants.cs` 
+    ```csharp
+    public const string ApiKeyHeaderName = "x-api-key";
+    ```
+
+- Create a new file `Auth\ApiKeyAuthFilter` 
+    ```csharp
+    using Microsoft.AspNetCore.Mvc;
+    using Microsoft.AspNetCore.Mvc.Filters;
+
+    namespace Movies.API.Auth;
+
+    public class ApiKeyAuthFilter : IAuthorizationFilter
+    {
+        private readonly IConfiguration _configuration;
+
+        public ApiKeyAuthFilter(IConfiguration configuration)
+        {
+            _configuration = configuration;
+        }
+
+        public void OnAuthorization(AuthorizationFilterContext context)
+        {
+            if (!context.HttpContext.Request.Headers.TryGetValue(APIAuthorizationConstants.ApiKeyHeaderName, out var requestedApiKey))
+            {
+                context.Result = new UnauthorizedObjectResult("API Key is missing");
+                return;
+            }
+            else 
+            {
+                var apiKey = _configuration.GetValue<string>("Api:Key")!;
+                if (apiKey != requestedApiKey)
+                {
+                    context.Result = new UnauthorizedObjectResult("Invalid API Key");
+                    return;
+                }
+            }
+            
+        }
+    }
+    ```
+
+- Update the `Program.cs` to setup the filter:
+    ```csharp
+    builder.Services.AddScoped<IAuthorizationFilter, ApiKeyAuthFilter>();
+    ```
+
+- Use the API Key Authentication on an endpoint in `MovieController`
+    ```csharp
+    [ServiceFilter(typeof(IAuthorizationFilter))]
+    ```
+
+This would work fine if we didn't have any other authentication, but we also implements user authentication with JWT. 
+
+
+
+

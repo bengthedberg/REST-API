@@ -1,6 +1,7 @@
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.OutputCaching;
 using Movies.API.Auth;
 using Movies.API.Mapping;
@@ -23,7 +24,8 @@ public class MovieController : ControllerBase
     }
 
     [HttpPost(APIEndpoints.Movies.Create)]
-    [Authorize(APIAuthorizationConstants.TrustedUserPolicyName)]
+    //[Authorize(APIAuthorizationConstants.TrustedUserPolicyName)]
+    [ServiceFilter(typeof(IAuthorizationFilter))]
     [ProducesResponseType(typeof(MovieResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ValidationFailureResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create([FromBody] CreateMovieRequest request, CancellationToken token)

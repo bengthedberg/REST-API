@@ -9,4 +9,6 @@ public static class APIAuthorizationConstants
     public const string TrustedUserClaimName = "trustedUser";
 
     public const string UserIdClaimName = "userid";
+
+    public const string ApiKeyHeaderName = "x-api-key";
 }
