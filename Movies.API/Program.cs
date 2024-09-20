@@ -54,7 +54,9 @@ builder.Services.AddApiVersioning(x =>
     x.AssumeDefaultVersionWhenUnspecified = true; // Assume the default version when the client does not specify a version
     x.ReportApiVersions = true;                   // Add headers to the response that indicate the supported versions, for example: api-supported-versions: 1.0, 2.0 api-deprecated-versions: 3.0
     x.ApiVersionReader = new MediaTypeApiVersionReader("api-version"); // Read the version from the Accept header, for example: Accept: application/json;api-version=1.0
-}).AddMvc().AddApiExplorer();
+}).AddApiExplorer();
+
+builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddResponseCaching();
 
@@ -82,6 +84,8 @@ builder.Services.AddApplication();
 builder.Services.AddDatabases(config["Database:ConnectionString"]!);
 
 var app = builder.Build();
+
+app.CreateApiVersionSet();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

@@ -95,7 +95,6 @@ Accept: application/json
 ### Get All Movies, that has a year of 2011 and sort by title
 GET {{baseURL}}/api/movies?Year=2011&SortBy=title
 Content-Type: application/json
-Authorization: Bearer {{jwtTrustedToken}}
 Accept: application/json
 
 ### Delete a Movie using id, will fail as trusted users can not delete movies m403 Forbidden.
