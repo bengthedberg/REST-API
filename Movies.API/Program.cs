@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Movies.API.Auth;
+using Movies.API.Endpoints;
 using Movies.API.Health;
 using Movies.API.Mapping;
 using Movies.API.Swagger;
@@ -38,7 +39,7 @@ builder.Services.AddAuthorization(x =>
 {
     //x.AddPolicy(APIAuthorizationConstants.AdminUserPolicyName, p => p.RequireClaim(APIAuthorizationConstants.AdminUserClaimName, "true"));
     x.AddPolicy(APIAuthorizationConstants.AdminUserPolicyName, p => p.Requirements.Add(new AdminAuthRequirement(config["Api:Key"]!, config["Api:UserId"]!)));
-    
+
     x.AddPolicy(APIAuthorizationConstants.TrustedUserPolicyName, p => p.RequireAssertion(ctx =>
         ctx.User.HasClaim(APIAuthorizationConstants.TrustedUserClaimName, "true") ||
         ctx.User.HasClaim(APIAuthorizationConstants.AdminUserClaimName, "true")
@@ -69,7 +70,7 @@ builder.Services.AddOutputCache(x =>
     });
 });
 
-builder.Services.AddControllers();
+//builder.Services.AddControllers();
 
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>(DatabaseHealthCheck.Name);
@@ -113,7 +114,8 @@ app.UseResponseCaching(); // Must be after UseCQRS
 app.UseOutputCache();     // Must be after UseCQRS
 
 app.UseMiddleware<ValidationMappingMiddleware>();
-app.MapControllers();
+//app.MapControllers();
+app.MapApiEndpoints();
 
 var dbMigration = app.Services.GetRequiredService<DatabaseMigration>();
 await dbMigration.Migrate();
